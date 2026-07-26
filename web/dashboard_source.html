@@ -239,6 +239,15 @@ table.data-table tbody tr:hover { background: color-mix(in srgb, var(--series-1)
 :root[data-theme="dark"] .flag.warn { color: var(--warning); }
 
 .legend-note { font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; }
+
+#snapshotBanner[hidden] { display: none; }
+#snapshotBanner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  background: color-mix(in srgb, var(--series-1) 10%, var(--surface-1));
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 16px; margin-bottom: 18px; font-size: 0.82rem; color: var(--text-secondary);
+}
+#snapshotBanner strong { color: var(--text-primary); }
 footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76rem; margin-top: 32px; }
 
 @media print {
@@ -289,8 +298,10 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
         <button class="btn-secondary" id="printBtn" type="button">Print / Export PDF</button>
         <button class="btn-secondary" id="downloadSummaryBtn" type="button">Download exec summary</button>
         <button class="btn-secondary" id="exportPptxBtn" type="button">Export to PPTX</button>
+        <button class="btn-primary" id="saveSnapshotBtn" type="button">Save as static report</button>
       </div>
     </div>
+    <div id="snapshotBanner" hidden></div>
     <div class="kpi-grid" id="kpiGrid"></div>
 
     <div class="toolbar"><h2>Advanced Visuals</h2></div>
@@ -391,9 +402,14 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
   <footer class="appfoot">All parsing and analysis runs locally in your browser &mdash; no file data is uploaded anywhere.</footer>
 </div>
 
+<!--SNAPSHOT_SCRIPT_MARKER-->
 <script>
 (function () {
   "use strict";
+
+  // Captured before any DOM mutation, so "Save as static report" can embed data
+  // into a pristine copy of this same page (including this script's own source).
+  var ORIGINAL_HTML = document.documentElement.outerHTML;
 
   /* ============================== State ============================== */
   var uploadedFiles = [];   // [{id, file, name, rows, headerMap, hasDateCol, detectedMonth, monthOverride, needsMonth}]
@@ -1435,6 +1451,50 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
 
   document.getElementById("exportPptxBtn").addEventListener("click", exportToPptx);
 
+  /* ============================== Static report snapshot ============================== */
+  function buildSnapshotHtml() {
+    var payload = {
+      records: records,
+      topN: document.getElementById("topNSelect").value,
+      theme: document.documentElement.getAttribute("data-theme") || null,
+      savedAt: new Date().toISOString()
+    };
+    // Escape "<" so no closing script tag or other markup can appear literally inside the
+    // embedded JSON, which would otherwise break out of this inline script tag.
+    var json = JSON.stringify(payload).replace(/</g, "\\u003c");
+    var script = '<script id="__snapshotData">window.__SNAPSHOT__=' + json + ";<" + "/script>";
+    // Insert right after the explicit HTML comment marker placed just before this
+    // app's own <script> tag, so window.__SNAPSHOT__ is defined before this
+    // script runs and reads it.
+    var marker = "<!--SNAPSHOT_SCRIPT_MARKER-->";
+    var markerIdx = ORIGINAL_HTML.indexOf(marker);
+    if (markerIdx === -1) return ORIGINAL_HTML + script;
+    var afterMarker = markerIdx + marker.length;
+    // Find where this app's own <script> tag starts, searching ONLY from just
+    // after the marker onward (never scanning into the tag's own body, which
+    // would false-match this very string literal -- the same self-reference
+    // problem as searching the whole document). Anything sitting between the
+    // marker and that tag is a stale snapshot script left by a previous save
+    // (this page was itself opened from a saved snapshot); replacing that
+    // whole span with the fresh script prevents a stale duplicate from lingering
+    // and winning at load time, since scripts execute in document order.
+    var appTagIdx = ORIGINAL_HTML.indexOf("<script>", afterMarker);
+    if (appTagIdx === -1) return ORIGINAL_HTML.slice(0, afterMarker) + script + ORIGINAL_HTML.slice(afterMarker);
+    return ORIGINAL_HTML.slice(0, afterMarker) + script + ORIGINAL_HTML.slice(appTagIdx);
+  }
+
+  document.getElementById("saveSnapshotBtn").addEventListener("click", function () {
+    if (!records.length) return;
+    var html = buildSnapshotHtml();
+    var blob = new Blob([html], { type: "text/html" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    var lt = lastAgg ? lastTwoMonths(lastAgg) : null;
+    var stamp = lt ? lt.latest : new Date().toISOString().slice(0, 7);
+    a.download = "subscription-cost-report-" + stamp + ".html";
+    a.click();
+  });
+
   /* ============================== Detail table ============================== */
   function renderDetailTable() {
     var filter = detailState.filter.toLowerCase();
@@ -1488,7 +1548,19 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     if (records.length) buildDashboard();
   });
 
-  renderFileList();
+  if (window.__SNAPSHOT__ && window.__SNAPSHOT__.records && window.__SNAPSHOT__.records.length) {
+    records = window.__SNAPSHOT__.records;
+    if (window.__SNAPSHOT__.theme) document.documentElement.setAttribute("data-theme", window.__SNAPSHOT__.theme);
+    if (window.__SNAPSHOT__.topN) document.getElementById("topNSelect").value = window.__SNAPSHOT__.topN;
+    var savedDate = window.__SNAPSHOT__.savedAt ? new Date(window.__SNAPSHOT__.savedAt).toLocaleString() : "an earlier session";
+    var banner = document.getElementById("snapshotBanner");
+    banner.hidden = false;
+    banner.innerHTML = "<span>&#128190; Showing a saved snapshot from <strong>" + esc(savedDate) + "</strong>. Upload new files above to replace it.</span>";
+    renderFileList();
+    buildDashboard();
+  } else {
+    renderFileList();
+  }
 })();
 </script>
 </body>
