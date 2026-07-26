@@ -1,0 +1,1304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Service Usage Cost Analytics Dashboard</title>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --surface-1:   #fcfcfb;
+  --page:        #f9f9f7;
+  --text-primary:   #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:     #898781;
+  --gridline:    #e1e0d9;
+  --baseline:    #c3c2b7;
+  --border:      rgba(11,11,11,0.10);
+  --success-text:#006300;
+
+  --series-1: #2a78d6; /* blue */
+  --series-2: #eb6834; /* orange */
+  --series-3: #1baf7a; /* aqua */
+  --series-4: #eda100; /* yellow */
+  --series-5: #e87ba4; /* magenta */
+  --series-6: #008300; /* green */
+  --series-7: #4a3aa7; /* violet */
+  --series-8: #e34948; /* red */
+
+  --seq-100:#cde2fb; --seq-150:#b7d3f6; --seq-200:#9ec5f4; --seq-250:#86b6ef;
+  --seq-300:#6da7ec; --seq-350:#5598e7; --seq-400:#3987e5; --seq-450:#2a78d6;
+  --seq-500:#256abf; --seq-550:#1c5cab; --seq-600:#184f95; --seq-650:#104281;
+  --seq-700:#0d366b;
+
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(11,11,11,0.06), 0 1px 8px rgba(11,11,11,0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --page:      #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:  #2c2c2a;
+    --baseline:  #383835;
+    --border:    rgba(255,255,255,0.10);
+    --success-text: #0ca30c;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --page:      #0d0d0d;
+  --text-primary:   #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted:     #898781;
+  --gridline:  #2c2c2a;
+  --baseline:  #383835;
+  --border:    rgba(255,255,255,0.10);
+  --success-text: #0ca30c;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--page);
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+.app { max-width: 1360px; margin: 0 auto; padding: 20px 24px 64px; }
+
+header.top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+header.top h1 { font-size: 1.5rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+header.top p { margin: 0; color: var(--text-secondary); font-size: 0.92rem; }
+.theme-toggle {
+  border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary);
+  border-radius: 999px; padding: 6px 14px; font-size: 0.8rem; cursor: pointer;
+}
+.theme-toggle:hover { color: var(--text-primary); }
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+/* ---------- Upload panel ---------- */
+#uploadPanel { padding: 24px; margin-bottom: 24px; }
+.dropzone {
+  border: 2px dashed var(--baseline);
+  border-radius: var(--radius);
+  padding: 36px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.dropzone:hover, .dropzone.drag { border-color: var(--series-1); background: color-mix(in srgb, var(--series-1) 6%, transparent); }
+.dropzone .icon { font-size: 2rem; margin-bottom: 8px; }
+.dropzone .hint { color: var(--text-muted); font-size: 0.82rem; margin-top: 6px; }
+.dropzone .schema { color: var(--text-secondary); font-size: 0.82rem; margin-top: 10px; }
+.dropzone code { background: var(--gridline); padding: 1px 6px; border-radius: 4px; font-size: 0.78rem; }
+#fileInput { display: none; }
+
+.upload-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+button {
+  font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--border);
+  padding: 9px 16px; font-size: 0.86rem; font-weight: 600;
+}
+.btn-primary { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+.btn-primary:hover { background: var(--seq-550); }
+.btn-primary:disabled { background: var(--baseline); border-color: var(--baseline); cursor: not-allowed; }
+.btn-secondary { background: transparent; color: var(--text-secondary); }
+.btn-secondary:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-secondary); padding: 6px 10px; }
+.btn-ghost:hover { color: var(--critical); }
+
+#fileList { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+.file-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem;
+}
+.file-row .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-row .fmeta { color: var(--text-muted); font-size: 0.78rem; }
+.file-row .frows { color: var(--text-secondary); white-space: nowrap; }
+.file-row input[type="month"] {
+  font: inherit; font-size: 0.82rem; padding: 5px 8px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--page); color: var(--text-primary);
+}
+.file-row.needs-month { outline: 1px solid var(--warning); }
+.badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.badge.auto { background: color-mix(in srgb, var(--good) 15%, transparent); color: var(--success-text); }
+.badge.manual { background: color-mix(in srgb, var(--warning) 22%, transparent); color: #7a5200; }
+:root[data-theme="dark"] .badge.manual { color: var(--warning); }
+@media (prefers-color-scheme:dark){ .badge.manual { color: var(--warning); } }
+#parseError { color: var(--critical); font-size: 0.84rem; margin-top: 10px; display: none; }
+#parseWarning { color: #7a5200; font-size: 0.82rem; margin-top: 10px; display: none; }
+:root[data-theme="dark"] #parseWarning { color: var(--warning); }
+@media (prefers-color-scheme:dark){ #parseWarning { color: var(--warning); } }
+
+/* ---------- Dashboard ---------- */
+#dashboardPanel[hidden] { display: none; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 28px 0 14px; }
+.toolbar h2 { font-size: 1.1rem; margin: 0; }
+.toolbar .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.toolbar select, .toolbar input[type="search"], .toolbar input[type="number"] {
+  font: inherit; font-size: 0.82rem; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+}
+.toolbar input[type="number"] { width: 70px; }
+.toolbar label { font-size: 0.78rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+
+.topn-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 14px 18px; margin-bottom: 18px;
+}
+.topn-banner .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.topn-banner strong { color: var(--series-1); }
+
+.kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 22px; }
+@media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .kpi-grid { grid-template-columns: 1fr; } }
+.kpi { padding: 16px 18px; }
+.kpi .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); font-weight: 700; }
+.kpi .value { font-size: 1.55rem; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.kpi .sub { font-size: 0.78rem; margin-top: 4px; color: var(--text-secondary); }
+.kpi .sub.delta-up { color: var(--critical); font-weight: 600; }
+.kpi .sub.delta-down { color: var(--success-text); font-weight: 600; }
+
+.chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 22px; }
+@media (max-width: 980px) { .chart-grid { grid-template-columns: 1fr; } }
+.chart-card { padding: 18px 20px; }
+.chart-card.full { grid-column: 1 / -1; }
+.chart-card h3 { font-size: 0.92rem; margin: 0 0 2px; }
+.chart-card .desc { font-size: 0.78rem; color: var(--text-muted); margin: 0 0 12px; }
+.chart-card .canvas-wrap { position: relative; height: 280px; }
+.chart-card .canvas-wrap.tall { height: 420px; }
+
+/* heatmap */
+.heatmap-scroll { overflow-x: auto; max-height: 520px; overflow-y: auto; }
+table.heatmap { border-collapse: collapse; width: 100%; font-size: 0.78rem; }
+table.heatmap th, table.heatmap td { padding: 6px 8px; text-align: right; white-space: nowrap; border: 1px solid var(--gridline); }
+table.heatmap th.rowhead, table.heatmap td.rowhead { text-align: left; position: sticky; left: 0; background: var(--surface-1); font-weight: 600; }
+table.heatmap thead th { color: var(--text-secondary); font-weight: 700; background: var(--surface-1); position: sticky; top: 0; z-index: 1; }
+table.heatmap td.cell { color: #0b0b0b; font-variant-numeric: tabular-nums; cursor: default; }
+table.heatmap td.cell[data-empty="1"] { color: var(--text-muted); background: transparent !important; }
+
+/* tables */
+.table-wrap { overflow-x: auto; }
+table.data-table { border-collapse: collapse; width: 100%; font-size: 0.84rem; }
+table.data-table th, table.data-table td { padding: 8px 10px; border-bottom: 1px solid var(--gridline); text-align: right; }
+table.data-table th:first-child, table.data-table td:first-child { text-align: left; }
+table.data-table thead th { color: var(--text-secondary); font-weight: 700; font-size: 0.76rem; text-transform: uppercase; letter-spacing: .03em; cursor: pointer; user-select: none; white-space: nowrap; }
+table.data-table thead th:hover { color: var(--text-primary); }
+table.data-table thead th.sorted::after { content: " \25BE"; }
+table.data-table tbody tr:hover { background: color-mix(in srgb, var(--series-1) 5%, transparent); }
+.delta-up { color: var(--critical); font-weight: 600; }
+.delta-down { color: var(--success-text); font-weight: 600; }
+.arrow { font-size: 0.75em; }
+.rank-cell { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.pagination { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; align-items: center; font-size: 0.8rem; color: var(--text-secondary); }
+.pagination button { padding: 4px 10px; font-size: 0.78rem; font-weight: 600; }
+
+/* executive summary */
+#execSummary { padding: 22px 24px; }
+#execSummary h2 { font-size: 1.1rem; margin: 0 0 4px; }
+#execSummary .meta { color: var(--text-muted); font-size: 0.78rem; margin-bottom: 16px; }
+.exec-section { margin-bottom: 16px; }
+.exec-section h4 { font-size: 0.86rem; margin: 0 0 6px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .03em; }
+.exec-section p, .exec-section li { font-size: 0.92rem; color: var(--text-primary); }
+.exec-section ul { margin: 4px 0; padding-left: 20px; }
+.stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 10px; }
+@media (max-width: 700px) { .stat-strip { grid-template-columns: repeat(2,1fr); } }
+.stat-strip div { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.stat-strip .k { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
+.stat-strip .v { font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.flag { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; margin: 3px 6px 3px 0; }
+.flag.warn { background: color-mix(in srgb, var(--warning) 20%, transparent); color: #7a5200; }
+.flag.crit { background: color-mix(in srgb, var(--critical) 15%, transparent); color: var(--critical); }
+@media (prefers-color-scheme: dark) { .flag.warn { color: var(--warning); } }
+:root[data-theme="dark"] .flag.warn { color: var(--warning); }
+
+.legend-note { font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; }
+footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76rem; margin-top: 32px; }
+
+@media print {
+  #uploadPanel, .theme-toggle, .toolbar .controls, .topn-banner, .pagination { display: none !important; }
+  .chart-card, .kpi, #execSummary { box-shadow: none; break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div>
+      <h1>Service Usage Cost Analytics Dashboard</h1>
+      <p>Upload usage/cost exports to build KPIs, trend visuals, month-on-month comparisons and an executive summary for your top services &mdash; all processed locally in your browser.</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">Toggle theme</button>
+  </header>
+
+  <section id="uploadPanel" class="card">
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload Excel or CSV files">
+      <div class="icon">&#128193;</div>
+      <div><strong>Drop Excel/CSV files here</strong> or click to browse</div>
+      <div class="hint">Accepts .xlsx, .xls, .csv &middot; one file with all history, or multiple monthly files &mdash; both work</div>
+      <div class="schema">Expected columns: <code>UsageDate</code> &middot; <code>ServiceName</code> &middot; <code>CostUSD</code> &middot; <code>Cost</code></div>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" multiple>
+    </div>
+    <div id="fileList"></div>
+    <div id="parseError"></div>
+    <div id="parseWarning"></div>
+    <div class="upload-actions">
+      <button class="btn-primary" id="buildBtn" disabled>Build dashboard</button>
+      <button class="btn-secondary" id="sampleBtn" type="button">Load sample data</button>
+      <button class="btn-secondary" id="clearBtn" type="button">Clear files</button>
+    </div>
+  </section>
+
+  <section id="dashboardPanel" hidden>
+    <div class="card topn-banner">
+      <div>Ranking, heatmap and monthly-increase views below show the <strong>Top <span id="topNLabel">20</span></strong> services by latest-month cost.</div>
+      <div class="controls">
+        <label>Top N
+          <select id="topNSelect">
+            <option value="10">Top 10</option>
+            <option value="20" selected>Top 20</option>
+            <option value="30">Top 30</option>
+            <option value="40">Top 40</option>
+            <option value="50">Top 50</option>
+            <option value="custom">Custom&hellip;</option>
+          </select>
+        </label>
+        <input type="number" id="topNCustom" min="1" max="500" placeholder="N" hidden>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <h2>Key Performance Indicators</h2>
+      <div class="controls">
+        <button class="btn-secondary" id="printBtn" type="button">Print / Export PDF</button>
+        <button class="btn-secondary" id="downloadSummaryBtn" type="button">Download exec summary</button>
+      </div>
+    </div>
+    <div class="kpi-grid" id="kpiGrid"></div>
+
+    <div class="toolbar"><h2>Advanced Visuals</h2></div>
+    <div class="chart-grid">
+      <div class="chart-card">
+        <h3>Monthly total cost trend</h3>
+        <p class="desc">Combined spend (CostUSD) across all services, by month.</p>
+        <div class="canvas-wrap"><canvas id="chartTrend"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Month-on-month % change</h3>
+        <p class="desc">Change in total spend versus the prior month.</p>
+        <div class="canvas-wrap"><canvas id="chartMoM"></canvas></div>
+      </div>
+      <div class="chart-card full">
+        <h3 id="topSvcTitle">Top 20 services by cost</h3>
+        <p class="desc">Ranked by spend in the latest month.</p>
+        <div class="canvas-wrap tall"><canvas id="chartTopSvc"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Cost share by service</h3>
+        <p class="desc">Share of latest-month spend, top 7 plus combined "Other".</p>
+        <div class="canvas-wrap tall"><canvas id="chartShare"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Service cost distribution</h3>
+        <p class="desc">Where the ranked services fall relative to the mean (latest month).</p>
+        <div class="canvas-wrap tall"><canvas id="chartDistribution"></canvas></div>
+      </div>
+      <div class="chart-card full">
+        <h3 id="heatmapTitle">Top 20 services &times; month cost heatmap</h3>
+        <p class="desc">Darker cells indicate higher spend for that service in that month.</p>
+        <div class="heatmap-scroll"><table class="heatmap" id="heatmapTable"></table></div>
+        <p class="legend-note">Color intensity is scaled per-row (relative to that service's own range) to surface each service's own trend.</p>
+      </div>
+    </div>
+
+    <div class="toolbar"><h2>Month-on-month comparison</h2></div>
+    <div class="card" style="padding:18px 20px; margin-bottom:22px;">
+      <div class="table-wrap">
+        <table class="data-table" id="momTable">
+          <thead><tr><th>Month</th><th>Total cost (USD)</th><th>$ Change</th><th>% Change</th><th>Active services</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <h2 id="increaseTitle">Monthly increase &mdash; Top 20 services</h2>
+      <div class="controls">
+        <input type="search" id="increaseSearch" placeholder="Search service&hellip;">
+      </div>
+    </div>
+    <div class="card" style="padding:18px 20px; margin-bottom:22px;">
+      <div class="table-wrap">
+        <table class="data-table" id="increaseTable">
+          <thead><tr>
+            <th data-key="rank">#</th>
+            <th data-key="service">Service</th>
+            <th data-key="prior">Prior month</th>
+            <th data-key="latest">Latest month</th>
+            <th data-key="delta">$ Change</th>
+            <th data-key="pct">% Change</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="legend-note">Click any column header to sort. Defaults to largest $ increase first.</p>
+    </div>
+
+    <section id="execSummary" class="card">
+      <h2>Executive management summary</h2>
+      <div class="meta" id="execMeta"></div>
+      <div id="execFlags"></div>
+      <div id="execBody"></div>
+    </section>
+
+    <div class="toolbar"><h2>Detail data</h2>
+      <div class="controls">
+        <input type="search" id="detailSearch" placeholder="Search service&hellip;">
+      </div>
+    </div>
+    <div class="card" style="padding:18px 20px; margin-bottom:22px;">
+      <div class="table-wrap">
+        <table class="data-table" id="detailTable">
+          <thead><tr>
+            <th data-key="service">Service</th>
+            <th data-key="month">Month</th>
+            <th data-key="cost">Cost</th>
+            <th data-key="costUsd">Cost (USD)</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pagination">
+        <span id="pageInfo"></span>
+        <button class="btn-secondary" id="prevPage">Prev</button>
+        <button class="btn-secondary" id="nextPage">Next</button>
+      </div>
+    </div>
+  </section>
+
+  <footer class="appfoot">All parsing and analysis runs locally in your browser &mdash; no file data is uploaded anywhere.</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ============================== State ============================== */
+  var uploadedFiles = [];   // [{id, name, json, serviceCol, costCol, costUsdCol, dateCol, hasDateCol, detectedMonth, monthOverride, needsMonth, rowCount}]
+  var records = [];         // flat parsed records [{service, cost, costUsd, month}]
+  var charts = {};          // Chart.js instances keyed by canvas id
+  var topN = 20;
+  var detailState = { page: 1, pageSize: 15, sortKey: "costUsd", sortDir: "desc", filter: "" };
+  var increaseState = { sortKey: "delta", sortDir: "desc", filter: "" };
+
+  var CATEGORICAL = ["--series-1","--series-2","--series-3","--series-4","--series-5","--series-6","--series-7"];
+  var SEQ_STEPS = ["--seq-100","--seq-150","--seq-200","--seq-250","--seq-300","--seq-350","--seq-400","--seq-450","--seq-500","--seq-550","--seq-600","--seq-650","--seq-700"];
+
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  /* ============================== Helpers ============================== */
+  function normKey(s) { return String(s == null ? "" : s).toLowerCase().replace(/[\s_\-()]/g, ""); }
+
+  var FIELD_CANDIDATES = {
+    service: ["servicename", "service", "servicetype", "metercategory"],
+    cost: ["cost", "pretaxcost", "billedcost", "effectivecost"],
+    costUsd: ["costusd", "costinusd", "usdcost", "costinbillingcurrency"],
+    date: ["usagedate", "date", "usagedatetime", "billingperiodstartdate", "billingmonth", "invoicemonth", "period", "month", "billingperiod"]
+  };
+
+  function findColumn(headers, candidates) {
+    var map = {};
+    headers.forEach(function (h) { map[normKey(h)] = h; });
+    for (var i = 0; i < candidates.length; i++) {
+      if (map[candidates[i]] !== undefined) return map[candidates[i]];
+    }
+    return null;
+  }
+
+  function parseNumeric(v) {
+    if (v == null || v === "") return NaN;
+    if (typeof v === "number") return v;
+    var cleaned = String(v).replace(/[^0-9.\-]/g, "");
+    return cleaned === "" ? NaN : parseFloat(cleaned);
+  }
+
+  function toMonthKey(d) {
+    if (!(d instanceof Date) || isNaN(d)) return null;
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  }
+
+  function parseAnyDate(v) {
+    if (v instanceof Date && !isNaN(v)) return v;
+    if (typeof v === "number") {
+      var epoch = new Date(Math.round((v - 25569) * 86400 * 1000));
+      if (!isNaN(epoch)) return epoch;
+    }
+    if (typeof v === "string") {
+      var d = new Date(v);
+      if (!isNaN(d)) return d;
+      var m = v.match(/^(20\d{2})[-\/](\d{1,2})/);
+      if (m) return new Date(+m[1], +m[2] - 1, 1);
+    }
+    return null;
+  }
+
+  var MONTH_NAMES = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+  function monthFromFilename(name) {
+    var base = name.replace(/\.[^.]+$/, "");
+    var m = base.match(/(20\d{2})[-_.]?(\d{2})(?!\d)/);
+    if (m) {
+      var mo = +m[2];
+      if (mo >= 1 && mo <= 12) return m[1] + "-" + String(mo).padStart(2, "0");
+    }
+    m = base.toLowerCase().match(/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s_\-]*?(20\d{2})/);
+    if (m) return m[2] + "-" + String(MONTH_NAMES[m[1]]).padStart(2, "0");
+    m = base.match(/(\d{1,2})[-_](20\d{2})/);
+    if (m && +m[1] >= 1 && +m[1] <= 12) return m[2] + "-" + String(+m[1]).padStart(2, "0");
+    return null;
+  }
+
+  function monthLabel(key) {
+    if (!key) return "Unknown";
+    var parts = key.split("-");
+    var d = new Date(+parts[0], +parts[1] - 1, 1);
+    return d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  }
+
+  function fmtUSD(n, opts) {
+    opts = opts || {};
+    if (n == null || isNaN(n)) return "&ndash;";
+    var digits = opts.digits != null ? opts.digits : 0;
+    return "$" + n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+  function fmtUSDCompact(n) {
+    if (n == null || isNaN(n)) return "&ndash;";
+    var abs = Math.abs(n);
+    if (abs >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
+    if (abs >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
+    return fmtUSD(n, { digits: 0 });
+  }
+  function fmtPct(n, opts) {
+    opts = opts || {};
+    if (n == null || isNaN(n) || !isFinite(n)) return "&ndash;";
+    var digits = opts.digits != null ? opts.digits : 1;
+    var sign = n > 0 ? "+" : "";
+    return sign + n.toFixed(digits) + "%";
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  /* ============================== File handling ============================== */
+  var dropzone = document.getElementById("dropzone");
+  var fileInput = document.getElementById("fileInput");
+  var fileListEl = document.getElementById("fileList");
+  var buildBtn = document.getElementById("buildBtn");
+  var parseErrorEl = document.getElementById("parseError");
+  var parseWarningEl = document.getElementById("parseWarning");
+  var fileSeq = 0;
+
+  dropzone.addEventListener("click", function () { fileInput.click(); });
+  dropzone.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") fileInput.click(); });
+  dropzone.addEventListener("dragover", function (e) { e.preventDefault(); dropzone.classList.add("drag"); });
+  dropzone.addEventListener("dragleave", function () { dropzone.classList.remove("drag"); });
+  dropzone.addEventListener("drop", function (e) {
+    e.preventDefault(); dropzone.classList.remove("drag");
+    handleFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener("change", function (e) { handleFiles(e.target.files); fileInput.value = ""; });
+  document.getElementById("clearBtn").addEventListener("click", function () {
+    uploadedFiles = []; records = []; renderFileList(); buildBtn.disabled = true;
+    document.getElementById("dashboardPanel").hidden = true;
+    parseErrorEl.style.display = "none";
+    parseWarningEl.style.display = "none";
+  });
+
+  function handleFiles(fileListArg) {
+    var arr = Array.from(fileListArg || []);
+    arr.forEach(function (file) { readFile(file); });
+  }
+
+  function readFile(file) {
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        var data = new Uint8Array(e.target.result);
+        var wb;
+        if (/\.csv$/i.test(file.name)) {
+          var text = new TextDecoder("utf-8").decode(data);
+          wb = XLSX.read(text, { type: "string" });
+        } else {
+          wb = XLSX.read(data, { type: "array", cellDates: true });
+        }
+        var sheetName = wb.SheetNames[0];
+        var sheet = wb.Sheets[sheetName];
+        var json = XLSX.utils.sheet_to_json(sheet, { defval: null, raw: true });
+        if (!json.length) throw new Error("No data rows found in " + file.name);
+
+        var headers = Object.keys(json[0]);
+        var serviceCol = findColumn(headers, FIELD_CANDIDATES.service);
+        var costCol = findColumn(headers, FIELD_CANDIDATES.cost);
+        var costUsdCol = findColumn(headers, FIELD_CANDIDATES.costUsd);
+        var dateCol = findColumn(headers, FIELD_CANDIDATES.date);
+
+        if (!serviceCol) throw new Error("Could not find a ServiceName column in " + file.name);
+        if (!costCol && !costUsdCol) throw new Error("Could not find a Cost or CostUSD column in " + file.name);
+
+        var entry = {
+          id: ++fileSeq, name: file.name, json: json,
+          serviceCol: serviceCol, costCol: costCol, costUsdCol: costUsdCol, dateCol: dateCol,
+          hasDateCol: !!dateCol,
+          detectedMonth: dateCol ? null : monthFromFilename(file.name),
+          monthOverride: null,
+          rowCount: json.length
+        };
+        entry.needsMonth = !entry.hasDateCol && !entry.detectedMonth;
+        uploadedFiles.push(entry);
+        parseErrorEl.style.display = "none";
+      } catch (err) {
+        parseErrorEl.textContent = "Error reading " + file.name + ": " + err.message;
+        parseErrorEl.style.display = "block";
+      }
+      renderFileList();
+    };
+    reader.onerror = function () {
+      parseErrorEl.textContent = "Could not read file: " + file.name;
+      parseErrorEl.style.display = "block";
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function renderFileList() {
+    fileListEl.innerHTML = "";
+    uploadedFiles.forEach(function (entry) {
+      var row = document.createElement("div");
+      row.className = "file-row" + (entry.needsMonth ? " needs-month" : "");
+
+      var fname = document.createElement("span");
+      fname.className = "fname";
+      fname.textContent = entry.name;
+      row.appendChild(fname);
+
+      var rows = document.createElement("span");
+      rows.className = "frows";
+      rows.textContent = entry.rowCount + " rows";
+      row.appendChild(rows);
+
+      if (entry.hasDateCol) {
+        var badge = document.createElement("span");
+        badge.className = "badge auto";
+        badge.textContent = "row-level dates (UsageDate)";
+        row.appendChild(badge);
+      } else {
+        var badge2 = document.createElement("span");
+        badge2.className = "badge " + (entry.detectedMonth ? "auto" : "manual");
+        badge2.textContent = entry.detectedMonth ? "auto: " + monthLabel(entry.detectedMonth) : "no date column — set month →";
+        row.appendChild(badge2);
+
+        var monthInput = document.createElement("input");
+        monthInput.type = "month";
+        monthInput.value = entry.monthOverride || entry.detectedMonth || "";
+        monthInput.addEventListener("change", function () {
+          entry.monthOverride = monthInput.value || null;
+          entry.needsMonth = !entry.monthOverride && !entry.detectedMonth;
+          renderFileList();
+        });
+        row.appendChild(monthInput);
+      }
+
+      var removeBtn = document.createElement("button");
+      removeBtn.className = "btn-ghost";
+      removeBtn.type = "button";
+      removeBtn.textContent = "✕";
+      removeBtn.title = "Remove file";
+      removeBtn.addEventListener("click", function () {
+        uploadedFiles = uploadedFiles.filter(function (f) { return f.id !== entry.id; });
+        renderFileList();
+      });
+      row.appendChild(removeBtn);
+
+      fileListEl.appendChild(row);
+    });
+    var anyBlocking = uploadedFiles.some(function (f) { return f.needsMonth; });
+    buildBtn.disabled = uploadedFiles.length === 0 || anyBlocking;
+  }
+
+  /* ============================== Build records ============================== */
+  function buildRecordsFromFiles() {
+    var out = [];
+    var skipped = 0;
+    uploadedFiles.forEach(function (entry) {
+      entry.json.forEach(function (row) {
+        var costUsd = entry.costUsdCol ? parseNumeric(row[entry.costUsdCol]) : NaN;
+        var costLocal = entry.costCol ? parseNumeric(row[entry.costCol]) : NaN;
+        if (isNaN(costUsd)) costUsd = costLocal;
+        if (isNaN(costLocal)) costLocal = costUsd;
+        if (isNaN(costUsd)) { skipped++; return; }
+
+        var month = null;
+        if (entry.hasDateCol) {
+          var d = parseAnyDate(row[entry.dateCol]);
+          month = d ? toMonthKey(d) : null;
+          if (!month) month = entry.monthOverride || entry.detectedMonth;
+        } else {
+          month = entry.monthOverride || entry.detectedMonth;
+        }
+        if (!month) { skipped++; return; }
+
+        var service = row[entry.serviceCol];
+        if (service == null || service === "") { skipped++; return; }
+
+        out.push({ service: String(service), cost: costLocal, costUsd: costUsd, month: month });
+      });
+    });
+    if (skipped > 0) {
+      parseWarningEl.textContent = skipped + " row(s) were skipped (missing/unparseable date, service, or cost).";
+      parseWarningEl.style.display = "block";
+    } else {
+      parseWarningEl.style.display = "none";
+    }
+    return out;
+  }
+
+  /* ============================== Sample data ============================== */
+  function generateSampleData() {
+    var services = [
+      "Virtual Machines", "Storage", "Azure SQL Database", "App Service", "Kubernetes Service",
+      "Networking", "Backup", "Monitor", "Cognitive Services", "Data Factory",
+      "Cosmos DB", "Functions", "Key Vault", "Log Analytics", "Container Registry",
+      "API Management", "Event Hubs", "Service Bus", "CDN", "DNS",
+      "ExpressRoute", "Bastion", "Automation", "Sentinel", "Purview"
+    ];
+    var base = [4200, 1100, 2800, 950, 1900, 600, 300, 250, 1500, 800, 1300, 400, 120, 350, 220, 700, 380, 260, 190, 60, 900, 150, 210, 640, 410];
+    var growth = [0.05, 0.03, 0.08, 0.01, 0.10, 0.01, 0.02, 0.04, 0.12, 0.06, 0.07, 0.09, 0.02, 0.05, 0.03, 0.04, 0.01, 0.02, 0.01, 0.00, -0.02, 0.03, 0.01, 0.15, 0.06];
+    var months = [];
+    var anchor = new Date(2026, 5, 1);
+    for (var i = 5; i >= 0; i--) {
+      var d = new Date(anchor.getFullYear(), anchor.getMonth() - i, 1);
+      months.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
+    }
+    var out = [];
+    var seed = 7;
+    function rand() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+    services.forEach(function (name, si) {
+      months.forEach(function (m, mi) {
+        var trended = base[si] * Math.pow(1 + growth[si], mi);
+        var noise = 0.9 + rand() * 0.2;
+        var costUsd = Math.round(trended * noise * 100) / 100;
+        out.push({ service: name, cost: costUsd, costUsd: costUsd, month: m });
+      });
+    });
+    return out;
+  }
+
+  document.getElementById("sampleBtn").addEventListener("click", function () {
+    uploadedFiles = [];
+    records = generateSampleData();
+    renderFileList();
+    parseErrorEl.style.display = "none";
+    parseWarningEl.style.display = "none";
+    buildDashboard();
+  });
+
+  document.getElementById("buildBtn").addEventListener("click", function () {
+    records = buildRecordsFromFiles();
+    if (!records.length) {
+      parseErrorEl.textContent = "No usable rows found. Check that your files contain UsageDate, ServiceName and Cost/CostUSD columns.";
+      parseErrorEl.style.display = "block";
+      return;
+    }
+    buildDashboard();
+  });
+
+  /* ============================== Top-N control ============================== */
+  var topNSelect = document.getElementById("topNSelect");
+  var topNCustom = document.getElementById("topNCustom");
+  topNSelect.addEventListener("change", function () {
+    if (topNSelect.value === "custom") {
+      topNCustom.hidden = false;
+      topNCustom.focus();
+      return;
+    }
+    topNCustom.hidden = true;
+    topN = parseInt(topNSelect.value, 10);
+    if (records.length) buildDashboard();
+  });
+  topNCustom.addEventListener("change", function () {
+    var v = parseInt(topNCustom.value, 10);
+    if (v > 0) {
+      topN = v;
+      if (records.length) buildDashboard();
+    }
+  });
+
+  /* ============================== Aggregation ============================== */
+  function aggregate(recs) {
+    var monthSet = {};
+    var matrix = {}; // service -> month -> costUsd
+    var monthTotals = {}; // month -> total
+    var monthSvcs = {}; // month -> Set of service
+
+    recs.forEach(function (r) {
+      monthSet[r.month] = true;
+      matrix[r.service] = matrix[r.service] || {};
+      matrix[r.service][r.month] = (matrix[r.service][r.month] || 0) + r.costUsd;
+      monthTotals[r.month] = (monthTotals[r.month] || 0) + r.costUsd;
+      monthSvcs[r.month] = monthSvcs[r.month] || {};
+      monthSvcs[r.month][r.service] = true;
+    });
+
+    var months = Object.keys(monthSet).sort();
+    var services = Object.keys(matrix);
+
+    return {
+      months: months,
+      services: services,
+      matrix: matrix,
+      monthTotals: monthTotals,
+      monthActiveCount: months.reduce(function (acc, m) { acc[m] = Object.keys(monthSvcs[m] || {}).length; return acc; }, {}),
+      totalAllTime: months.reduce(function (s, m) { return s + monthTotals[m]; }, 0)
+    };
+  }
+
+  /* ============================== Rendering ============================== */
+  function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+  function buildDashboard() {
+    var agg = aggregate(records);
+    if (agg.months.length === 0) return;
+
+    document.getElementById("dashboardPanel").hidden = false;
+    var effectiveN = Math.min(topN, agg.services.length);
+    document.getElementById("topNLabel").textContent = effectiveN;
+
+    renderKPIs(agg);
+    renderTrendChart(agg);
+    renderMoMChart(agg);
+    renderTopSvcChart(agg, effectiveN);
+    renderShareChart(agg);
+    renderDistributionChart(agg, effectiveN);
+    renderHeatmap(agg, effectiveN);
+    renderMoMTable(agg);
+    renderIncreaseTable(agg, effectiveN);
+    renderExecutiveSummary(agg, effectiveN);
+    detailState.page = 1;
+    renderDetailTable();
+
+    document.getElementById("dashboardPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function lastTwoMonths(agg) {
+    var n = agg.months.length;
+    return { latest: agg.months[n - 1], prior: n >= 2 ? agg.months[n - 2] : null };
+  }
+
+  function rankServices(agg) {
+    var lt = lastTwoMonths(agg);
+    return agg.services.map(function (svc) {
+      return { service: svc, cost: (agg.matrix[svc] && agg.matrix[svc][lt.latest]) || 0 };
+    }).sort(function (a, b) { return b.cost - a.cost; });
+  }
+
+  function renderKPIs(agg) {
+    var lt = lastTwoMonths(agg);
+    var latestTotal = agg.monthTotals[lt.latest] || 0;
+    var priorTotal = lt.prior ? (agg.monthTotals[lt.prior] || 0) : null;
+    var momDelta = priorTotal != null ? latestTotal - priorTotal : null;
+    var momPct = priorTotal ? (momDelta / priorTotal) * 100 : null;
+    var activeLatest = agg.monthActiveCount[lt.latest] || 0;
+    var avgPerSvc = activeLatest ? latestTotal / activeLatest : 0;
+
+    var kpis = [
+      { label: "Total spend (all months)", value: fmtUSDCompact(agg.totalAllTime), sub: agg.months.length + " month" + (agg.months.length === 1 ? "" : "s") + " &middot; " + agg.services.length + " services" },
+      { label: "Latest month spend", value: fmtUSDCompact(latestTotal), sub: monthLabel(lt.latest) },
+      { label: "Month-on-month change", value: momPct == null ? "&ndash;" : fmtPct(momPct), sub: momDelta == null ? "No prior month" : (momDelta >= 0 ? "&#9650; " : "&#9660; ") + fmtUSDCompact(Math.abs(momDelta)), subClass: momDelta == null ? "" : (momDelta >= 0 ? "delta-up" : "delta-down") },
+      { label: "Active services (latest)", value: String(activeLatest), sub: agg.services.length + " total seen across all months" },
+      { label: "Avg cost / service (latest)", value: fmtUSDCompact(avgPerSvc), sub: monthLabel(lt.latest) }
+    ];
+
+    var grid = document.getElementById("kpiGrid");
+    grid.innerHTML = "";
+    kpis.forEach(function (k) {
+      var div = document.createElement("div");
+      div.className = "card kpi";
+      div.innerHTML = '<div class="label">' + esc(k.label) + '</div>' +
+        '<div class="value">' + k.value + '</div>' +
+        '<div class="sub' + (k.subClass ? " " + k.subClass : "") + '">' + k.sub + '</div>';
+      grid.appendChild(div);
+    });
+  }
+
+  function renderTrendChart(agg) {
+    var ctx = document.getElementById("chartTrend").getContext("2d");
+    destroyChart("trend");
+    var labels = agg.months.map(monthLabel);
+    var data = agg.months.map(function (m) { return Math.round((agg.monthTotals[m] || 0) * 100) / 100; });
+    var blue = cssVar("--series-1");
+    var grid = cssVar("--gridline");
+    var muted = cssVar("--text-muted");
+    charts.trend = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "Total cost (USD)", data: data,
+          borderColor: blue, backgroundColor: cssVar("--seq-150"), fill: true, tension: 0.25,
+          pointRadius: 4, pointBackgroundColor: blue, pointHoverRadius: 6, borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: function (c) { return "  " + fmtUSD(c.parsed.y).replace("&ndash;","-"); } } }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: muted } },
+          y: { grid: { color: grid }, ticks: { color: muted, callback: function (v) { return fmtUSDCompact(v).replace(/&\w+;/g, ""); } } }
+        }
+      }
+    });
+  }
+
+  function renderMoMChart(agg) {
+    var ctx = document.getElementById("chartMoM").getContext("2d");
+    destroyChart("mom");
+    var months = agg.months.slice(1);
+    var labels = months.map(monthLabel);
+    var pct = months.map(function (m, i) {
+      var prior = agg.monthTotals[agg.months[i]];
+      var cur = agg.monthTotals[m];
+      return prior ? ((cur - prior) / prior) * 100 : null;
+    });
+    var good = cssVar("--good"), critical = cssVar("--critical");
+    var colors = pct.map(function (v) { return v >= 0 ? critical : good; });
+    var muted = cssVar("--text-muted");
+    charts.mom = new Chart(ctx, {
+      type: "bar",
+      data: { labels: labels, datasets: [{ label: "MoM % change", data: pct.map(function(v){return v==null?0:Math.round(v*10)/10;}), backgroundColor: colors, borderRadius: 4, maxBarThickness: 46 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: function (c) { return (c.parsed.y >= 0 ? "Increase " : "Decrease ") + fmtPct(c.parsed.y).replace(/[+]/,""); } } }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: muted } },
+          y: { grid: { color: cssVar("--gridline") }, ticks: { color: muted, callback: function (v) { return v + "%"; } } }
+        }
+      }
+    });
+  }
+
+  function renderTopSvcChart(agg, n) {
+    var ranked = rankServices(agg).slice(0, n);
+    document.getElementById("topSvcTitle").textContent = "Top " + ranked.length + " services by cost";
+
+    var ctx = document.getElementById("chartTopSvc").getContext("2d");
+    destroyChart("topsvc");
+    var blue = cssVar("--series-1");
+    var muted = cssVar("--text-muted");
+    charts.topsvc = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: ranked.map(function (r) { return r.service; }),
+        datasets: [{ label: "Cost (USD)", data: ranked.map(function (r) { return Math.round(r.cost * 100) / 100; }), backgroundColor: blue, borderRadius: 4 }]
+      },
+      options: {
+        indexAxis: "y", responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: function (c) { return "  " + fmtUSD(c.parsed.x); } } }
+        },
+        scales: {
+          x: { grid: { color: cssVar("--gridline") }, ticks: { color: muted, callback: function (v) { return fmtUSDCompact(v).replace(/&\w+;/g, ""); } } },
+          y: { grid: { display: false }, ticks: { color: muted, autoSkip: false, font: { size: 10 } } }
+        }
+      }
+    });
+  }
+
+  function renderShareChart(agg) {
+    var ranked = rankServices(agg);
+    var top = ranked.slice(0, 7);
+    var rest = ranked.slice(7);
+    var restTotal = rest.reduce(function (s, r) { return s + r.cost; }, 0);
+    var labels = top.map(function (r) { return r.service; });
+    var data = top.map(function (r) { return Math.round(r.cost * 100) / 100; });
+    if (restTotal > 0) { labels.push("Other (" + rest.length + ")"); data.push(Math.round(restTotal * 100) / 100); }
+
+    var colors = CATEGORICAL.slice(0, top.length).map(cssVar);
+    if (restTotal > 0) colors.push(cssVar("--baseline"));
+
+    var ctx = document.getElementById("chartShare").getContext("2d");
+    destroyChart("share");
+    var total = data.reduce(function (s, v) { return s + v; }, 0) || 1;
+    charts.share = new Chart(ctx, {
+      type: "doughnut",
+      data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderColor: cssVar("--surface-1"), borderWidth: 2 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "right", labels: { color: cssVar("--text-secondary"), boxWidth: 12, font: { size: 11 } } },
+          tooltip: { callbacks: { label: function (c) { var pct = (c.parsed / total) * 100; return " " + c.label + ": " + fmtUSD(c.parsed) + " (" + pct.toFixed(1) + "%)"; } } }
+        }
+      }
+    });
+  }
+
+  function renderDistributionChart(agg, n) {
+    var ranked = rankServices(agg).slice(0, n);
+    var costs = ranked.map(function (r) { return r.cost; });
+    var mean = costs.length ? costs.reduce(function (a, b) { return a + b; }, 0) / costs.length : 0;
+    var colors = costs.map(function (c) { return c >= mean ? cssVar("--series-2") : cssVar("--series-1"); });
+
+    var ctx = document.getElementById("chartDistribution").getContext("2d");
+    destroyChart("dist");
+    var muted = cssVar("--text-muted");
+    charts.dist = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: ranked.map(function (r) { return r.service; }),
+        datasets: [{ label: "Cost (USD)", data: costs.map(function (c) { return Math.round(c * 100) / 100; }), backgroundColor: colors, borderRadius: 3 }]
+      },
+      options: {
+        indexAxis: "y", responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: function (c) { return "  " + fmtUSD(c.parsed.x) + (c.parsed.x >= mean ? "  (above avg)" : "  (below avg)"); } } },
+          annotation: undefined
+        },
+        scales: {
+          x: { grid: { color: cssVar("--gridline") }, ticks: { color: muted, callback: function (v) { return fmtUSDCompact(v).replace(/&\w+;/g, ""); } } },
+          y: { grid: { display: false }, ticks: { color: muted, autoSkip: false, font: { size: 9 } } }
+        }
+      }
+    });
+  }
+
+  function renderHeatmap(agg, n) {
+    var ranked = rankServices(agg).slice(0, n);
+    document.getElementById("heatmapTitle").innerHTML = "Top " + ranked.length + " services &times; month cost heatmap";
+
+    var table = document.getElementById("heatmapTable");
+    var thead = "<thead><tr><th class='rowhead'>Service</th>" + agg.months.map(function (m) { return "<th>" + monthLabel(m) + "</th>"; }).join("") + "</tr></thead>";
+    var seqStops = SEQ_STEPS.map(cssVar);
+
+    function interpolate(t) {
+      var idx = t * (seqStops.length - 1);
+      return seqStops[Math.round(idx)] || seqStops[0];
+    }
+    function textColorFor(t) { return t > 0.55 ? "#ffffff" : "#0b0b0b"; }
+
+    var rowsHtml = ranked.map(function (r) {
+      var rowVals = agg.months.map(function (m) { return (agg.matrix[r.service] && agg.matrix[r.service][m]) || null; });
+      var present = rowVals.filter(function (v) { return v != null; });
+      var min = present.length ? Math.min.apply(null, present) : 0;
+      var max = present.length ? Math.max.apply(null, present) : 0;
+      var cells = rowVals.map(function (v) {
+        if (v == null) return "<td class='cell' data-empty='1'>&ndash;</td>";
+        var t = max > min ? (v - min) / (max - min) : 0.5;
+        var bg = interpolate(t);
+        var fg = textColorFor(t);
+        return "<td class='cell' style='background:" + bg + ";color:" + fg + ";' title='" + esc(r.service) + "'>" + fmtUSDCompact(v).replace(/&\w+;/g, "") + "</td>";
+      }).join("");
+      return "<tr><td class='rowhead'>" + esc(r.service) + "</td>" + cells + "</tr>";
+    }).join("");
+
+    table.innerHTML = thead + "<tbody>" + rowsHtml + "</tbody>";
+  }
+
+  function renderMoMTable(agg) {
+    var tbody = document.querySelector("#momTable tbody");
+    tbody.innerHTML = "";
+    agg.months.forEach(function (m, i) {
+      var total = agg.monthTotals[m] || 0;
+      var prior = i > 0 ? agg.monthTotals[agg.months[i - 1]] : null;
+      var delta = prior != null ? total - prior : null;
+      var pct = prior ? (delta / prior) * 100 : null;
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + monthLabel(m) + "</td>" +
+        "<td>" + fmtUSD(total) + "</td>" +
+        "<td class='" + (delta == null ? "" : (delta >= 0 ? "delta-up" : "delta-down")) + "'>" + (delta == null ? "&ndash;" : (delta >= 0 ? "&#9650; " : "&#9660; ") + fmtUSD(Math.abs(delta))) + "</td>" +
+        "<td class='" + (pct == null ? "" : (pct >= 0 ? "delta-up" : "delta-down")) + "'>" + (pct == null ? "&ndash;" : fmtPct(pct)) + "</td>" +
+        "<td>" + (agg.monthActiveCount[m] || 0) + "</td>";
+      tbody.appendChild(tr);
+    });
+  }
+
+  /* ============================== Monthly increase (Top N) ============================== */
+  function computeTopNMovement(agg, n) {
+    var lt = lastTwoMonths(agg);
+    var ranked = rankServices(agg).slice(0, n);
+    return ranked.map(function (r, i) {
+      var latest = r.cost;
+      var prior = lt.prior ? ((agg.matrix[r.service] && agg.matrix[r.service][lt.prior]) || 0) : null;
+      var delta = prior != null ? latest - prior : null;
+      var pct = (prior != null && prior !== 0) ? (delta / prior) * 100 : (prior === 0 && latest > 0 ? 100 : null);
+      return { rank: i + 1, service: r.service, prior: prior, latest: latest, delta: delta, pct: pct };
+    });
+  }
+
+  function renderIncreaseTable(agg, n) {
+    document.getElementById("increaseTitle").textContent = "Monthly increase — Top " + n + " services";
+    var rows = computeTopNMovement(agg, n);
+    renderIncreaseRows(rows);
+    increaseState._rows = rows;
+  }
+
+  function renderIncreaseRows(rows) {
+    var filter = increaseState.filter.toLowerCase();
+    var filtered = rows.filter(function (r) { return !filter || r.service.toLowerCase().indexOf(filter) !== -1; });
+    filtered = filtered.slice().sort(function (a, b) {
+      var k = increaseState.sortKey, dir = increaseState.sortDir === "asc" ? 1 : -1;
+      var av = a[k], bv = b[k];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "number") return (av - bv) * dir;
+      return String(av).localeCompare(String(bv)) * dir;
+    });
+
+    var tbody = document.querySelector("#increaseTable tbody");
+    if (!filtered.length) {
+      tbody.innerHTML = "<tr><td colspan='6' style='text-align:center;color:var(--text-muted);'>No matching services, or not enough months of data yet</td></tr>";
+    } else {
+      tbody.innerHTML = filtered.map(function (r) {
+        var cls = r.delta == null ? "" : (r.delta >= 0 ? "delta-up" : "delta-down");
+        return "<tr>" +
+          "<td class='rank-cell'>" + r.rank + "</td>" +
+          "<td>" + esc(r.service) + "</td>" +
+          "<td>" + (r.prior == null ? "&ndash;" : fmtUSD(r.prior)) + "</td>" +
+          "<td>" + fmtUSD(r.latest) + "</td>" +
+          "<td class='" + cls + "'>" + (r.delta == null ? "&ndash;" : (r.delta >= 0 ? "+" : "") + fmtUSD(r.delta)) + "</td>" +
+          "<td class='" + cls + "'>" + (r.pct == null ? "&ndash;" : fmtPct(r.pct)) + "</td>" +
+          "</tr>";
+      }).join("");
+    }
+
+    document.querySelectorAll("#increaseTable thead th").forEach(function (th) {
+      th.classList.toggle("sorted", th.getAttribute("data-key") === increaseState.sortKey);
+    });
+  }
+
+  document.getElementById("increaseSearch").addEventListener("input", function (e) {
+    increaseState.filter = e.target.value;
+    if (increaseState._rows) renderIncreaseRows(increaseState._rows);
+  });
+  document.querySelectorAll("#increaseTable thead th").forEach(function (th) {
+    th.addEventListener("click", function () {
+      var key = th.getAttribute("data-key");
+      if (increaseState.sortKey === key) increaseState.sortDir = increaseState.sortDir === "asc" ? "desc" : "asc";
+      else { increaseState.sortKey = key; increaseState.sortDir = key === "service" ? "asc" : "desc"; }
+      if (increaseState._rows) renderIncreaseRows(increaseState._rows);
+    });
+  });
+
+  /* ============================== Executive summary ============================== */
+  function stddev(arr) {
+    if (!arr.length) return 0;
+    var mean = arr.reduce(function (a, b) { return a + b; }, 0) / arr.length;
+    var variance = arr.reduce(function (a, b) { return a + Math.pow(b - mean, 2); }, 0) / arr.length;
+    return Math.sqrt(variance);
+  }
+
+  function renderExecutiveSummary(agg, n) {
+    var lt = lastTwoMonths(agg);
+    var latestTotal = agg.monthTotals[lt.latest] || 0;
+    var priorTotal = lt.prior ? agg.monthTotals[lt.prior] : null;
+    var momPct = priorTotal ? ((latestTotal - priorTotal) / priorTotal) * 100 : null;
+    var firstTotal = agg.monthTotals[agg.months[0]] || 0;
+    var cumulativePct = firstTotal ? ((latestTotal - firstTotal) / firstTotal) * 100 : null;
+
+    var transitions = [];
+    for (var i = 1; i < agg.months.length; i++) {
+      var prior = agg.monthTotals[agg.months[i - 1]];
+      var cur = agg.monthTotals[agg.months[i]];
+      if (prior) transitions.push({ month: agg.months[i], pct: ((cur - prior) / prior) * 100 });
+    }
+    var avgMoM = transitions.length ? transitions.reduce(function (s, t) { return s + t.pct; }, 0) / transitions.length : null;
+
+    var ranked = rankServices(agg);
+    var top3Share = latestTotal ? (ranked.slice(0, 3).reduce(function (s, r) { return s + r.cost; }, 0) / latestTotal) * 100 : 0;
+    var top1 = ranked[0];
+
+    var movement = computeTopNMovement(agg, n).filter(function (r) { return r.delta != null; });
+    var gainers = movement.slice().sort(function (a, b) { return b.delta - a.delta; });
+    var decliners = movement.slice().sort(function (a, b) { return a.delta - b.delta; });
+    var topGainer = gainers.find(function (r) { return r.delta > 0; });
+    var topDecliner = decliners.find(function (r) { return r.delta < 0; });
+
+    var latestCosts = ranked.map(function (r) { return r.cost; }).filter(function (v) { return v > 0; });
+    var meanCost = latestCosts.length ? latestCosts.reduce(function (a, b) { return a + b; }, 0) / latestCosts.length : 0;
+    var sd = stddev(latestCosts);
+    var sorted = latestCosts.slice().sort(function (a, b) { return a - b; });
+    var median = sorted.length ? (sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2) : 0;
+
+    var anomalyThreshold = 20;
+    var anomalies = transitions.filter(function (t) { return Math.abs(t.pct) >= anomalyThreshold; });
+
+    var forecastBase = latestTotal;
+    var forecastGrowth = transitions.length ? transitions.slice(-3).reduce(function (s, t) { return s + t.pct; }, 0) / Math.min(3, transitions.length) / 100 : 0;
+    var forecast = forecastBase * (1 + forecastGrowth);
+
+    var risingCount = movement.filter(function (r) { return r.delta > 0; }).length;
+    var fallingCount = movement.filter(function (r) { return r.delta < 0; }).length;
+
+    document.getElementById("execMeta").textContent =
+      "Analysis window: " + monthLabel(agg.months[0]) + " – " + monthLabel(lt.latest) + " (" + agg.months.length + " months) · " +
+      agg.services.length + " distinct services · Top " + n + " scope for movement/heatmap views · generated client-side from uploaded data.";
+
+    var flags = [];
+    if (anomalies.length) {
+      anomalies.forEach(function (a) {
+        flags.push("<span class='flag crit'>&#9888; " + monthLabel(a.month) + ": " + fmtPct(a.pct) + " swing</span>");
+      });
+    }
+    if (top3Share >= 60) flags.push("<span class='flag warn'>&#9888; High concentration: top 3 services = " + top3Share.toFixed(0) + "% of spend</span>");
+    document.getElementById("execFlags").innerHTML = flags.join("");
+
+    var trendWord = momPct == null ? "stable" : momPct > 2 ? "rising" : momPct < -2 ? "declining" : "roughly flat";
+    var avgWord = avgMoM == null ? "insufficient history" : (avgMoM >= 0 ? "growing" : "shrinking") + " at an average of " + fmtPct(Math.abs(avgMoM)) + " per month";
+
+    var body = "";
+    body += "<div class='exec-section'><h4>Overview</h4><p>";
+    body += "Across " + agg.months.length + " month" + (agg.months.length === 1 ? "" : "s") + " of data (" + monthLabel(agg.months[0]) + " through " + monthLabel(lt.latest) + "), total tracked service spend was <strong>" + fmtUSD(agg.totalAllTime) + "</strong> across <strong>" + agg.services.length + "</strong> distinct services. ";
+    body += "The most recent month (" + monthLabel(lt.latest) + ") totaled <strong>" + fmtUSD(latestTotal) + "</strong>";
+    body += momPct != null ? (", " + trendWord + " " + fmtPct(momPct) + " versus " + monthLabel(lt.prior) + ".") : ".";
+    body += "</p>";
+    body += "<div class='stat-strip'>" +
+      "<div><div class='k'>Mean cost / service (Top " + n + ")</div><div class='v'>" + fmtUSDCompact(meanCost) + "</div></div>" +
+      "<div><div class='k'>Median cost / service</div><div class='v'>" + fmtUSDCompact(median) + "</div></div>" +
+      "<div><div class='k'>Std deviation</div><div class='v'>" + fmtUSDCompact(sd) + "</div></div>" +
+      "<div><div class='k'>Top 3 share of spend</div><div class='v'>" + top3Share.toFixed(1) + "%</div></div>" +
+      "</div></div>";
+
+    body += "<div class='exec-section'><h4>Trend analysis</h4><p>";
+    body += "Spend is " + avgWord + " across the observed period. ";
+    body += cumulativePct != null ? ("Cumulatively, total monthly spend has " + (cumulativePct >= 0 ? "increased " : "decreased ") + fmtPct(Math.abs(cumulativePct)).replace("+","") + " from " + monthLabel(agg.months[0]) + " to " + monthLabel(lt.latest) + ". ") : "";
+    body += "Based on the trailing trend, next month's spend is projected at approximately <strong>" + fmtUSDCompact(forecast) + "</strong> (indicative, assuming the recent growth rate continues).";
+    body += "</p></div>";
+
+    body += "<div class='exec-section'><h4>Concentration & largest driver</h4><p>";
+    if (top1) body += "<strong>" + esc(top1.service) + "</strong> is the largest single cost driver in " + monthLabel(lt.latest) + " at " + fmtUSD(top1.cost) + " (" + (latestTotal ? ((top1.cost / latestTotal) * 100).toFixed(1) : "0") + "% of total). ";
+    body += "The top 3 services together account for " + top3Share.toFixed(1) + "% of latest-month spend" + (top3Share >= 60 ? ", indicating meaningful cost concentration worth monitoring." : ", a reasonably distributed cost base.");
+    body += "</p></div>";
+
+    body += "<div class='exec-section'><h4>Movers within the Top " + n + "</h4><ul>";
+    body += "<li>Of the Top " + n + " services, <strong>" + risingCount + "</strong> increased and <strong>" + fallingCount + "</strong> decreased versus " + (lt.prior ? monthLabel(lt.prior) : "the prior month") + ".</li>";
+    if (topGainer) body += "<li><strong>" + esc(topGainer.service) + "</strong> had the largest increase: " + fmtUSD(topGainer.delta) + " (" + fmtPct(topGainer.pct) + ") from " + monthLabel(lt.prior) + " to " + monthLabel(lt.latest) + ".</li>";
+    if (topDecliner) body += "<li><strong>" + esc(topDecliner.service) + "</strong> had the largest decrease: " + fmtUSD(Math.abs(topDecliner.delta)) + " (" + fmtPct(topDecliner.pct) + ") over the same period.</li>";
+    if (!topGainer && !topDecliner) body += "<li>Not enough months of data yet to compare movers &mdash; upload at least two months.</li>";
+    body += "</ul></div>";
+
+    body += "<div class='exec-section'><h4>Recommendations</h4><ul>";
+    if (topGainer) body += "<li>Review <strong>" + esc(topGainer.service) + "</strong> to confirm the " + fmtPct(topGainer.pct) + " increase is expected (e.g. planned scale-up) rather than unmanaged growth.</li>";
+    if (top3Share >= 50) body += "<li>Consider a deeper cost-optimization review of the top services given their concentrated share of total spend.</li>";
+    if (anomalies.length) body += "<li>Investigate the flagged month(s) with unusually large swings (&ge;" + anomalyThreshold + "%) to confirm they reflect legitimate business activity.</li>";
+    body += "<li>Track low-usage services outside the Top " + n + " for potential decommissioning or rightsizing opportunities.</li>";
+    body += "</ul></div>";
+
+    document.getElementById("execBody").innerHTML = body;
+  }
+
+  document.getElementById("downloadSummaryBtn").addEventListener("click", function () {
+    var text = document.getElementById("execSummary").innerText;
+    var blob = new Blob([text], { type: "text/plain" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "executive_summary.txt";
+    a.click();
+  });
+  document.getElementById("printBtn").addEventListener("click", function () { window.print(); });
+
+  /* ============================== Detail table ============================== */
+  function renderDetailTable() {
+    var filter = document.getElementById("detailSearch").value.toLowerCase();
+    var rows = records.filter(function (r) { return !filter || r.service.toLowerCase().indexOf(filter) !== -1; });
+    rows.sort(function (a, b) {
+      var k = detailState.sortKey, dir = detailState.sortDir === "asc" ? 1 : -1;
+      if (typeof a[k] === "number") return (a[k] - b[k]) * dir;
+      return String(a[k]).localeCompare(String(b[k])) * dir;
+    });
+
+    var totalPages = Math.max(1, Math.ceil(rows.length / detailState.pageSize));
+    detailState.page = Math.min(detailState.page, totalPages);
+    var start = (detailState.page - 1) * detailState.pageSize;
+    var pageRows = rows.slice(start, start + detailState.pageSize);
+
+    var tbody = document.querySelector("#detailTable tbody");
+    tbody.innerHTML = pageRows.map(function (r) {
+      return "<tr><td>" + esc(r.service) + "</td><td>" + monthLabel(r.month) + "</td><td>" + fmtUSD(r.cost) + "</td><td>" + fmtUSD(r.costUsd) + "</td></tr>";
+    }).join("") || "<tr><td colspan='4' style='text-align:center;color:var(--text-muted);'>No matching rows</td></tr>";
+
+    document.getElementById("pageInfo").textContent = "Page " + detailState.page + " of " + totalPages + " (" + rows.length + " rows)";
+    document.getElementById("prevPage").disabled = detailState.page <= 1;
+    document.getElementById("nextPage").disabled = detailState.page >= totalPages;
+  }
+
+  document.getElementById("detailSearch").addEventListener("input", function () { detailState.page = 1; renderDetailTable(); });
+  document.getElementById("prevPage").addEventListener("click", function () { detailState.page--; renderDetailTable(); });
+  document.getElementById("nextPage").addEventListener("click", function () { detailState.page++; renderDetailTable(); });
+  document.querySelectorAll("#detailTable thead th").forEach(function (th) {
+    th.addEventListener("click", function () {
+      var key = th.getAttribute("data-key");
+      if (detailState.sortKey === key) detailState.sortDir = detailState.sortDir === "asc" ? "desc" : "asc";
+      else { detailState.sortKey = key; detailState.sortDir = "desc"; }
+      renderDetailTable();
+    });
+  });
+
+  /* ============================== Theme toggle ============================== */
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    var root = document.documentElement;
+    var current = root.getAttribute("data-theme");
+    var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var next;
+    if (!current) next = prefersDark ? "light" : "dark";
+    else next = current === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    if (records.length) buildDashboard();
+  });
+
+  renderFileList();
+})();
+</script>
+</body>
+</html>
