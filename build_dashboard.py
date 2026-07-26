@@ -1,18 +1,22 @@
 """
-Builds the standalone dashboard.html from web/dashboard_source.html by
-inlining the vendored JS libraries (web/vendor/*.js), so the final file
-can be opened directly in a browser with no server and no internet access.
+Builds the standalone dashboard HTML files from their web/*_source.html
+templates by inlining the vendored JS libraries (web/vendor/*.js), so the
+final files can be opened directly in a browser with no server and no
+internet access.
 
-Re-run after editing web/dashboard_source.html:
+Re-run after editing any web/*_source.html file:
     python build_dashboard.py
 """
 import os
 import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SOURCE = os.path.join(HERE, "web", "dashboard_source.html")
 VENDOR_DIR = os.path.join(HERE, "web", "vendor")
-OUTPUT = os.path.join(HERE, "dashboard.html")
+
+BUILDS = [
+    ("web/dashboard_source.html", "dashboard.html"),
+    ("web/service_usage_source.html", "service-usage.html"),
+]
 
 
 def inline_script(html, src_name):
@@ -27,14 +31,21 @@ def inline_script(html, src_name):
     return new_html
 
 
-def main():
-    with open(SOURCE, "r", encoding="utf-8") as f:
+def build(source_rel, output_rel):
+    source = os.path.join(HERE, source_rel)
+    output = os.path.join(HERE, output_rel)
+    with open(source, "r", encoding="utf-8") as f:
         html = f.read()
     html = inline_script(html, "xlsx.full.min.js")
     html = inline_script(html, "chart.umd.min.js")
-    with open(OUTPUT, "w", encoding="utf-8") as f:
+    with open(output, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"Wrote {OUTPUT} ({os.path.getsize(OUTPUT):,} bytes)")
+    print(f"Wrote {output} ({os.path.getsize(output):,} bytes)")
+
+
+def main():
+    for source_rel, output_rel in BUILDS:
+        build(source_rel, output_rel)
 
 
 if __name__ == "__main__":
