@@ -6,6 +6,7 @@
 <title>Subscription Cost Analytics Dashboard</title>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/chart.umd.min.js"></script>
+<script src="vendor/pptxgen.bundle.js"></script>
 <style>
 :root {
   color-scheme: light;
@@ -190,6 +191,8 @@ button {
 .chart-card .desc { font-size: 0.78rem; color: var(--text-muted); margin: 0 0 12px; }
 .chart-card .canvas-wrap { position: relative; height: 280px; }
 .chart-card .canvas-wrap.tall { height: 340px; }
+.chart-card .canvas-wrap-scroll { position: relative; max-height: 560px; overflow-y: auto; overflow-x: hidden; }
+.chart-card .canvas-wrap-scroll #topSubsCanvasInner { position: relative; width: 100%; }
 
 /* heatmap */
 .heatmap-scroll { overflow-x: auto; }
@@ -285,6 +288,7 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
         </label>
         <button class="btn-secondary" id="printBtn" type="button">Print / Export PDF</button>
         <button class="btn-secondary" id="downloadSummaryBtn" type="button">Download exec summary</button>
+        <button class="btn-secondary" id="exportPptxBtn" type="button">Export to PPTX</button>
       </div>
     </div>
     <div class="kpi-grid" id="kpiGrid"></div>
@@ -301,10 +305,10 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
         <p class="desc">Change in total spend versus the prior month.</p>
         <div class="canvas-wrap"><canvas id="chartMoM"></canvas></div>
       </div>
-      <div class="chart-card">
+      <div class="chart-card full">
         <h3 id="topSubsTitle">Top 10 subscriptions by cost</h3>
-        <p class="desc">Ranked by spend in the latest month.</p>
-        <div class="canvas-wrap tall"><canvas id="chartTopSubs"></canvas></div>
+        <p class="desc">One bar per month, per subscription &mdash; ranked by spend in the latest month.</p>
+        <div class="canvas-wrap-scroll"><div id="topSubsCanvasInner"><canvas id="chartTopSubs"></canvas></div></div>
       </div>
       <div class="chart-card">
         <h3>Cost share by subscription</h3>
@@ -495,6 +499,13 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
+  }
+
+  var SHORTEN_PREFIX = true;
+  function shortSubName(name) {
+    if (!SHORTEN_PREFIX || !name) return name;
+    var stripped = String(name).replace(/^.*?\bsandbox\.?/i, "");
+    return stripped || name;
   }
 
   /* ============================== File handling ============================== */
@@ -762,12 +773,17 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
   /* ============================== Rendering ============================== */
   function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
 
+  var lastAgg = null;
+  var lastTopN = null;
+
   function buildDashboard() {
     var agg = aggregate(records);
     if (agg.months.length === 0) return;
 
     document.getElementById("dashboardPanel").hidden = false;
     var topN = parseInt(document.getElementById("topNSelect").value, 10);
+    lastAgg = agg;
+    lastTopN = topN;
 
     renderKPIs(agg);
     renderTrendChart(agg);
@@ -857,6 +873,42 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     });
   }
 
+  function barValueLabelPlugin(formatter, opts) {
+    opts = opts || {};
+    var fontSize = opts.fontSize || 11;
+    return {
+      id: "barValueLabel",
+      afterDatasetsDraw: function (chart) {
+        var ctx = chart.ctx;
+        var horizontal = chart.options.indexAxis === "y";
+        chart.data.datasets.forEach(function (dataset, di) {
+          var meta = chart.getDatasetMeta(di);
+          if (meta.hidden) return;
+          meta.data.forEach(function (bar, i) {
+            var value = dataset.data[i];
+            if (value == null) return;
+            var label = formatter(value, i, dataset, di);
+            if (!label) return;
+            var pos = bar.tooltipPosition();
+            ctx.save();
+            ctx.fillStyle = cssVar("--text-secondary");
+            ctx.font = "600 " + fontSize + "px system-ui, -apple-system, 'Segoe UI', sans-serif";
+            if (horizontal) {
+              ctx.textAlign = value >= 0 ? "left" : "right";
+              ctx.textBaseline = "middle";
+              ctx.fillText(label, pos.x + (value >= 0 ? 5 : -5), pos.y);
+            } else {
+              ctx.textAlign = "center";
+              ctx.textBaseline = value >= 0 ? "bottom" : "top";
+              ctx.fillText(label, pos.x, pos.y + (value >= 0 ? -4 : 4));
+            }
+            ctx.restore();
+          });
+        });
+      }
+    };
+  }
+
   function renderMoMChart(agg) {
     var ctx = document.getElementById("chartMoM").getContext("2d");
     destroyChart("mom");
@@ -873,8 +925,10 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     charts.mom = new Chart(ctx, {
       type: "bar",
       data: { labels: labels, datasets: [{ label: "MoM % change", data: pct.map(function(v){return v==null?0:Math.round(v*10)/10;}), backgroundColor: colors, borderRadius: 4, maxBarThickness: 46 }] },
+      plugins: [barValueLabelPlugin(function (v) { return fmtPct(v); })],
       options: {
         responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 22, bottom: 18 } },
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: function (c) { return (c.parsed.y >= 0 ? "Increase " : "Decrease ") + fmtPct(c.parsed.y).replace(/[+]/,""); } } }
@@ -887,6 +941,16 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     });
   }
 
+  function monthColorRamp(months) {
+    var seqStops = SEQ_STEPS.map(cssVar);
+    var n = months.length;
+    return months.map(function (m, i) {
+      var t = n <= 1 ? 1 : i / (n - 1);
+      var idx = Math.round(t * (seqStops.length - 1));
+      return seqStops[idx];
+    });
+  }
+
   function renderTopSubsChart(agg, topN) {
     var lt = lastTwoMonths(agg);
     var ranked = agg.subIds.map(function (id) {
@@ -895,28 +959,88 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
 
     document.getElementById("topSubsTitle").textContent = "Top " + ranked.length + " subscriptions by cost";
 
+    var inner = document.getElementById("topSubsCanvasInner");
+    var perSubPx = Math.max(28, Math.min(140, agg.months.length * 20 + 20));
+    inner.style.height = Math.max(300, ranked.length * perSubPx) + "px";
+
     var ctx = document.getElementById("chartTopSubs").getContext("2d");
     destroyChart("topsubs");
-    var blue = cssVar("--series-1");
     var muted = cssVar("--text-muted");
+    var colors = monthColorRamp(agg.months);
+    var datasets = agg.months.map(function (m, i) {
+      return {
+        label: monthLabel(m),
+        data: ranked.map(function (r) { return Math.round(((agg.matrix[r.id] && agg.matrix[r.id][m]) || 0) * 100) / 100; }),
+        backgroundColor: colors[i],
+        borderRadius: 3
+      };
+    });
     charts.topsubs = new Chart(ctx, {
       type: "bar",
-      data: {
-        labels: ranked.map(function (r) { return r.name; }),
-        datasets: [{ label: "Cost (USD)", data: ranked.map(function (r) { return Math.round(r.cost * 100) / 100; }), backgroundColor: blue, borderRadius: 4 }]
-      },
+      data: { labels: ranked.map(function (r) { return shortSubName(r.name); }), datasets: datasets },
+      plugins: [barValueLabelPlugin(function (value, i, dataset) {
+        return dataset.label + "  " + fmtUSDCompact(value).replace(/&\w+;/g, "");
+      }, { fontSize: 9 })],
       options: {
         indexAxis: "y", responsive: true, maintainAspectRatio: false,
+        layout: { padding: { right: 90 } },
         plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { label: function (c) { return "  " + fmtUSD(c.parsed.x); } } }
+          legend: { position: "top", labels: { color: cssVar("--text-secondary"), boxWidth: 12, font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              title: function (items) { return ranked[items[0].dataIndex] ? ranked[items[0].dataIndex].name : items[0].label; },
+              label: function (c) { return "  " + c.dataset.label + ": " + fmtUSD(c.parsed.x); }
+            }
+          }
         },
         scales: {
-          x: { grid: { color: cssVar("--gridline") }, ticks: { color: muted, callback: function (v) { return fmtUSDCompact(v).replace(/&\w+;/g, ""); } } },
-          y: { grid: { display: false }, ticks: { color: muted } }
+          x: { grid: { color: cssVar("--gridline") }, grace: "20%", ticks: { color: muted, callback: function (v) { return fmtUSDCompact(v).replace(/&\w+;/g, ""); } } },
+          y: { grid: { display: false }, ticks: { color: muted, autoSkip: false, font: { size: 10 } } }
         }
       }
     });
+  }
+
+  function hexLuminance(hex) {
+    var h = String(hex || "").replace("#", "");
+    if (h.length === 3) h = h.split("").map(function (c) { return c + c; }).join("");
+    if (h.length !== 6) return 0.5;
+    var r = parseInt(h.substr(0, 2), 16) / 255;
+    var g = parseInt(h.substr(2, 2), 16) / 255;
+    var b = parseInt(h.substr(4, 2), 16) / 255;
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  function doughnutLabelPlugin(minPct) {
+    minPct = minPct || 4;
+    return {
+      id: "doughnutLabel",
+      afterDatasetsDraw: function (chart) {
+        var ctx = chart.ctx;
+        var meta = chart.getDatasetMeta(0);
+        var dataset = chart.data.datasets[0];
+        var total = dataset.data.reduce(function (s, v) { return s + v; }, 0) || 1;
+        meta.data.forEach(function (arc, i) {
+          var value = dataset.data[i];
+          if (value == null) return;
+          var pct = (value / total) * 100;
+          if (pct < minPct) return;
+          var midAngle = (arc.startAngle + arc.endAngle) / 2;
+          var midRadius = (arc.innerRadius + arc.outerRadius) / 2;
+          var x = arc.x + Math.cos(midAngle) * midRadius;
+          var y = arc.y + Math.sin(midAngle) * midRadius;
+          var bg = Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor[i] : dataset.backgroundColor;
+          var lum = hexLuminance(bg);
+          ctx.save();
+          ctx.fillStyle = lum > 0.6 ? "#0b0b0b" : "#ffffff";
+          ctx.font = "700 12px system-ui, -apple-system, 'Segoe UI', sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(pct.toFixed(1) + "%", x, y);
+          ctx.restore();
+        });
+      }
+    };
   }
 
   function renderShareChart(agg) {
@@ -928,7 +1052,7 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     var top = ranked.slice(0, 7);
     var rest = ranked.slice(7);
     var restTotal = rest.reduce(function (s, r) { return s + r.cost; }, 0);
-    var labels = top.map(function (r) { return r.name; });
+    var labels = top.map(function (r) { return shortSubName(r.name); });
     var data = top.map(function (r) { return Math.round(r.cost * 100) / 100; });
     if (restTotal > 0) { labels.push("Other (" + rest.length + ")"); data.push(Math.round(restTotal * 100) / 100); }
 
@@ -941,6 +1065,7 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     charts.share = new Chart(ctx, {
       type: "doughnut",
       data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderColor: cssVar("--surface-1"), borderWidth: 2 }] },
+      plugins: [doughnutLabelPlugin(4)],
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: {
@@ -982,7 +1107,7 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
         var fg = textColorFor(t);
         return "<td class='cell' style='background:" + bg + ";color:" + fg + ";' title='" + esc(r.name) + "'>" + fmtUSDCompact(v).replace(/&\w+;/g, "") + "</td>";
       }).join("");
-      return "<tr><td class='rowhead'>" + esc(r.name) + "</td>" + cells + "</tr>";
+      return "<tr><td class='rowhead' title='" + esc(r.name) + "'>" + esc(shortSubName(r.name)) + "</td>" + cells + "</tr>";
     }).join("");
 
     table.innerHTML = thead + "<tbody>" + rowsHtml + "</tbody>";
@@ -1033,7 +1158,7 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
       }
       rows.forEach(function (r) {
         var tr = document.createElement("tr");
-        tr.innerHTML = "<td>" + esc(r.name) + "</td><td>" + fmtUSD(r.prior) + "</td><td>" + fmtUSD(r.latest) + "</td>" +
+        tr.innerHTML = "<td title='" + esc(r.name) + "'>" + esc(shortSubName(r.name)) + "</td><td>" + fmtUSD(r.prior) + "</td><td>" + fmtUSD(r.latest) + "</td>" +
           "<td class='" + cls + "'>" + (r.delta >= 0 ? "+" : "") + fmtUSD(r.delta) + "</td>" +
           "<td class='" + cls + "'>" + fmtPct(r.pct) + "</td>";
         tbody.appendChild(tr);
@@ -1125,18 +1250,18 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     body += "</p></div>";
 
     body += "<div class='exec-section'><h4>Concentration & largest driver</h4><p>";
-    if (top1) body += "<strong>" + esc(top1.name) + "</strong> is the largest single cost driver in " + monthLabel(lt.latest) + " at " + fmtUSD(top1.cost) + " (" + (latestTotal ? ((top1.cost / latestTotal) * 100).toFixed(1) : "0") + "% of total). ";
+    if (top1) body += "<strong>" + esc(shortSubName(top1.name)) + "</strong> is the largest single cost driver in " + monthLabel(lt.latest) + " at " + fmtUSD(top1.cost) + " (" + (latestTotal ? ((top1.cost / latestTotal) * 100).toFixed(1) : "0") + "% of total). ";
     body += "The top 3 subscriptions together account for " + top3Share.toFixed(1) + "% of latest-month spend" + (top3Share >= 60 ? ", indicating meaningful cost concentration worth monitoring." : ", a reasonably distributed cost base.");
     body += "</p></div>";
 
     body += "<div class='exec-section'><h4>Movers & shakers</h4><ul>";
-    if (topGainer) body += "<li><strong>" + esc(topGainer.name) + "</strong> had the largest increase: " + fmtUSD(topGainer.delta) + " (" + fmtPct(topGainer.pct) + ") from " + monthLabel(lt.prior) + " to " + monthLabel(lt.latest) + ".</li>";
-    if (topDecliner) body += "<li><strong>" + esc(topDecliner.name) + "</strong> had the largest decrease: " + fmtUSD(Math.abs(topDecliner.delta)) + " (" + fmtPct(topDecliner.pct) + ") over the same period.</li>";
+    if (topGainer) body += "<li><strong>" + esc(shortSubName(topGainer.name)) + "</strong> had the largest increase: " + fmtUSD(topGainer.delta) + " (" + fmtPct(topGainer.pct) + ") from " + monthLabel(lt.prior) + " to " + monthLabel(lt.latest) + ".</li>";
+    if (topDecliner) body += "<li><strong>" + esc(shortSubName(topDecliner.name)) + "</strong> had the largest decrease: " + fmtUSD(Math.abs(topDecliner.delta)) + " (" + fmtPct(topDecliner.pct) + ") over the same period.</li>";
     if (!topGainer && !topDecliner) body += "<li>Not enough months of data yet to compare movers &mdash; upload at least two months.</li>";
     body += "</ul></div>";
 
     body += "<div class='exec-section'><h4>Recommendations</h4><ul>";
-    if (topGainer) body += "<li>Review <strong>" + esc(topGainer.name) + "</strong> to confirm the " + fmtPct(topGainer.pct) + " increase is expected (e.g. planned scale-up) rather than unmanaged growth.</li>";
+    if (topGainer) body += "<li>Review <strong>" + esc(shortSubName(topGainer.name)) + "</strong> to confirm the " + fmtPct(topGainer.pct) + " increase is expected (e.g. planned scale-up) rather than unmanaged growth.</li>";
     if (top3Share >= 50) body += "<li>Consider a deeper cost-optimization review of the top subscriptions given their concentrated share of total spend.</li>";
     if (anomalies.length) body += "<li>Investigate the flagged month(s) with unusually large swings (&ge;" + anomalyThreshold + "%) to confirm they reflect legitimate business activity.</li>";
     body += "<li>Track low-activity subscriptions (below the median cost) for potential consolidation or decommissioning opportunities.</li>";
@@ -1154,6 +1279,153 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     a.click();
   });
   document.getElementById("printBtn").addEventListener("click", function () { window.print(); });
+
+  /* ============================== PPTX export ============================== */
+  function domTableToRows(tableId) {
+    var table = document.getElementById(tableId);
+    if (!table) return [];
+    var rows = [];
+    table.querySelectorAll("thead tr").forEach(function (tr) {
+      rows.push(Array.prototype.map.call(tr.children, function (th) {
+        return { text: th.textContent.trim(), options: { bold: true, color: "FFFFFF", fill: { color: "1F3864" }, fontSize: 10 } };
+      }));
+    });
+    table.querySelectorAll("tbody tr").forEach(function (tr) {
+      rows.push(Array.prototype.map.call(tr.children, function (td) {
+        return { text: td.textContent.trim(), options: { fontSize: 9 } };
+      }));
+    });
+    return rows;
+  }
+
+  function execSectionsData() {
+    var sections = [];
+    document.querySelectorAll("#execBody .exec-section").forEach(function (sec) {
+      var heading = sec.querySelector("h4");
+      var bullets = [];
+      sec.querySelectorAll("p, li").forEach(function (el) {
+        var t = el.textContent.replace(/\s+/g, " ").trim();
+        if (t) bullets.push(t);
+      });
+      sections.push({ heading: heading ? heading.textContent.trim() : "", bullets: bullets });
+    });
+    return sections;
+  }
+
+  function addBulletSlide(pptx, title, sections) {
+    var slide = pptx.addSlide();
+    slide.addText(title, { x: 0.4, y: 0.25, w: 9.2, h: 0.5, fontSize: 20, bold: true, color: "1F3864" });
+    var y = 0.9;
+    sections.forEach(function (sec) {
+      if (y > 6.9) return;
+      slide.addText(sec.heading, { x: 0.4, y: y, w: 9.2, h: 0.3, fontSize: 13, bold: true, color: "2a78d6" });
+      y += 0.35;
+      var bulletText = sec.bullets.map(function (b) { return { text: b, options: { bullet: true, breakLine: true } }; });
+      var estHeight = Math.max(0.3, sec.bullets.length * 0.4);
+      slide.addText(bulletText, { x: 0.5, y: y, w: 9.0, h: estHeight, fontSize: 11, color: "0b0b0b", valign: "top" });
+      y += estHeight + 0.15;
+    });
+  }
+
+  function exportToPptx() {
+    if (!lastAgg) return;
+    var btn = document.getElementById("exportPptxBtn");
+    var originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Generating…";
+
+    setTimeout(function () {
+      try {
+        var pptx = new PptxGenJS();
+        pptx.layout = "LAYOUT_WIDE";
+        pptx.author = "Subscription Cost Analytics Dashboard";
+        pptx.title = "Subscription Cost Analytics Dashboard";
+
+        var lt = lastTwoMonths(lastAgg);
+        var metaText = document.getElementById("execMeta").textContent.trim();
+
+        // Title slide
+        var title = pptx.addSlide();
+        title.background = { color: "1F3864" };
+        title.addText("Subscription Cost Analytics Dashboard", { x: 0.6, y: 2.3, w: 9, h: 1, fontSize: 32, bold: true, color: "FFFFFF" });
+        title.addText(metaText, { x: 0.6, y: 3.3, w: 9, h: 0.8, fontSize: 14, color: "D9E2F3" });
+        title.addText("Generated " + new Date().toLocaleString(), { x: 0.6, y: 4.9, w: 9, h: 0.4, fontSize: 11, color: "9FB6E0" });
+
+        // KPI slide
+        var kpiSlide = pptx.addSlide();
+        kpiSlide.addText("Key Performance Indicators", { x: 0.4, y: 0.25, w: 9.2, h: 0.5, fontSize: 20, bold: true, color: "1F3864" });
+        var kpiCards = document.querySelectorAll("#kpiGrid .kpi");
+        var kpiW = 1.84, kpiGap = 0.1, kpiX0 = 0.4;
+        kpiCards.forEach(function (card, i) {
+          var label = card.querySelector(".label").textContent.trim();
+          var value = card.querySelector(".value").textContent.trim();
+          var sub = card.querySelector(".sub").textContent.trim();
+          var x = kpiX0 + i * (kpiW + kpiGap);
+          kpiSlide.addShape("roundRect", { x: x, y: 1.1, w: kpiW, h: 1.5, fill: { color: "F4F6FB" }, line: { color: "D9E2F3" }, rectRadius: 0.06 });
+          kpiSlide.addText(label.toUpperCase(), { x: x + 0.08, y: 1.2, w: kpiW - 0.16, h: 0.4, fontSize: 8, bold: true, color: "6B7280" });
+          kpiSlide.addText(value, { x: x + 0.08, y: 1.55, w: kpiW - 0.16, h: 0.5, fontSize: 16, bold: true, color: "1F3864" });
+          kpiSlide.addText(sub, { x: x + 0.08, y: 2.1, w: kpiW - 0.16, h: 0.45, fontSize: 8, color: "52514E" });
+        });
+
+        // Chart image slides
+        [
+          { chart: "trend", title: "Monthly Total Cost Trend" },
+          { chart: "mom", title: "Month-on-Month % Change" },
+          { chart: "topsubs", title: document.getElementById("topSubsTitle").textContent },
+          { chart: "share", title: "Cost Share by Subscription" }
+        ].forEach(function (c) {
+          if (!charts[c.chart]) return;
+          var slide = pptx.addSlide();
+          slide.addText(c.title, { x: 0.4, y: 0.25, w: 9.2, h: 0.5, fontSize: 20, bold: true, color: "1F3864" });
+          var img = charts[c.chart].toBase64Image();
+          var canvas = charts[c.chart].canvas;
+          var ratio = canvas.height / canvas.width;
+          var w = 9.0, h = Math.min(6.2, w * ratio);
+          slide.addImage({ data: img, x: (10 - w) / 2, y: 1.0, w: w, h: h });
+        });
+
+        // Month-on-month comparison table
+        var momRows = domTableToRows("momTable");
+        if (momRows.length) {
+          var momSlide = pptx.addSlide();
+          momSlide.addText("Month-on-Month Comparison", { x: 0.4, y: 0.25, w: 9.2, h: 0.5, fontSize: 20, bold: true, color: "1F3864" });
+          momSlide.addTable(momRows, { x: 0.4, y: 1.0, w: 9.2, autoPage: false, border: { type: "solid", color: "E1E0D9", pt: 0.5 } });
+        }
+
+        // Movers tables
+        var gainerRows = domTableToRows("gainersTable");
+        var declinerRows = domTableToRows("declinersTable");
+        if (gainerRows.length || declinerRows.length) {
+          var moversSlide = pptx.addSlide();
+          moversSlide.addText("Monthly Increase — Biggest Movers", { x: 0.4, y: 0.25, w: 9.2, h: 0.5, fontSize: 20, bold: true, color: "1F3864" });
+          if (gainerRows.length) {
+            moversSlide.addText("Top gainers", { x: 0.4, y: 0.85, w: 4.4, h: 0.3, fontSize: 12, bold: true, color: "d03b3b" });
+            moversSlide.addTable(gainerRows, { x: 0.4, y: 1.15, w: 4.4, fontSize: 8, autoPage: false, border: { type: "solid", color: "E1E0D9", pt: 0.5 } });
+          }
+          if (declinerRows.length) {
+            moversSlide.addText("Top decliners", { x: 5.1, y: 0.85, w: 4.4, h: 0.3, fontSize: 12, bold: true, color: "0ca30c" });
+            moversSlide.addTable(declinerRows, { x: 5.1, y: 1.15, w: 4.4, fontSize: 8, autoPage: false, border: { type: "solid", color: "E1E0D9", pt: 0.5 } });
+          }
+        }
+
+        // Executive summary slides (split into two for readability)
+        var sections = execSectionsData();
+        var mid = Math.ceil(sections.length / 2);
+        addBulletSlide(pptx, "Executive Summary (1/2)", sections.slice(0, mid));
+        addBulletSlide(pptx, "Executive Summary (2/2)", sections.slice(mid));
+
+        pptx.writeFile({ fileName: "subscription-cost-dashboard.pptx" });
+      } catch (err) {
+        console.error(err);
+        alert("PPTX export failed: " + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }, 30);
+  }
+
+  document.getElementById("exportPptxBtn").addEventListener("click", exportToPptx);
 
   /* ============================== Detail table ============================== */
   function renderDetailTable() {

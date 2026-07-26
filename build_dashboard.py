@@ -13,6 +13,8 @@ import re
 HERE = os.path.dirname(os.path.abspath(__file__))
 VENDOR_DIR = os.path.join(HERE, "web", "vendor")
 
+VENDOR_LIBS = ["xlsx.full.min.js", "chart.umd.min.js", "pptxgen.bundle.js"]
+
 BUILDS = [
     ("web/dashboard_source.html", "dashboard.html"),
     ("web/service_usage_source.html", "service-usage.html"),
@@ -20,6 +22,9 @@ BUILDS = [
 
 
 def inline_script(html, src_name):
+    tag = '<script src="vendor/' + src_name + '"></script>'
+    if tag not in html:
+        return html  # this source doesn't reference this vendor lib; skip
     path = os.path.join(VENDOR_DIR, src_name)
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -36,8 +41,8 @@ def build(source_rel, output_rel):
     output = os.path.join(HERE, output_rel)
     with open(source, "r", encoding="utf-8") as f:
         html = f.read()
-    html = inline_script(html, "xlsx.full.min.js")
-    html = inline_script(html, "chart.umd.min.js")
+    for lib in VENDOR_LIBS:
+        html = inline_script(html, lib)
     with open(output, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"Wrote {output} ({os.path.getsize(output):,} bytes)")
