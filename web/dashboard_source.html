@@ -441,13 +441,21 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
   function parseAnyDate(v) {
     if (v instanceof Date && !isNaN(v)) return v;
     if (typeof v === "number") {
-      var epoch = new Date(Math.round((v - 25569) * 86400 * 1000));
-      if (!isNaN(epoch)) return epoch;
+      // Excel serial date -> UTC instant; re-anchor to the same UTC calendar date
+      // expressed in local time, so downstream local getters (toMonthKey) are timezone-safe.
+      var utc = new Date(Math.round((v - 25569) * 86400 * 1000));
+      if (!isNaN(utc)) return new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate());
     }
     if (typeof v === "string") {
-      var d = new Date(v);
+      var trimmed = v.trim();
+      // Bare "YYYY-MM-DD" (no time part) is parsed by the JS Date spec as UTC midnight,
+      // which shifts to the previous local day (and possibly month) west of UTC. Parse
+      // the components directly as a local date instead of going through Date(string).
+      var iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (iso) return new Date(+iso[1], +iso[2] - 1, +iso[3]);
+      var d = new Date(trimmed);
       if (!isNaN(d)) return d;
-      var m = v.match(/^(20\d{2})[-\/](\d{1,2})/);
+      var m = trimmed.match(/^(20\d{2})[-\/](\d{1,2})/);
       if (m) return new Date(+m[1], +m[2] - 1, 1);
     }
     return null;
@@ -544,7 +552,7 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
         var wb;
         if (/\.csv$/i.test(file.name)) {
           var text = new TextDecoder("utf-8").decode(data);
-          wb = XLSX.read(text, { type: "string" });
+          wb = XLSX.read(text, { type: "string", raw: true });
         } else {
           wb = XLSX.read(data, { type: "array", cellDates: true });
         }

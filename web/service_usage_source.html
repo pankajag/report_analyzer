@@ -6,6 +6,7 @@
 <title>Service Usage Cost Analytics Dashboard</title>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/chart.umd.min.js"></script>
+<script src="vendor/pptxgen.bundle.js"></script>
 <style>
 :root {
   color-scheme: light;
@@ -307,6 +308,7 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
       <div class="controls">
         <button class="btn-secondary" id="printBtn" type="button">Print / Export PDF</button>
         <button class="btn-secondary" id="downloadSummaryBtn" type="button">Download exec summary</button>
+        <button class="btn-secondary" id="exportPptxBtn" type="button">Export to PPTX</button>
       </div>
     </div>
     <div class="kpi-grid" id="kpiGrid"></div>
@@ -465,13 +467,21 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
   function parseAnyDate(v) {
     if (v instanceof Date && !isNaN(v)) return v;
     if (typeof v === "number") {
-      var epoch = new Date(Math.round((v - 25569) * 86400 * 1000));
-      if (!isNaN(epoch)) return epoch;
+      // Excel serial date -> UTC instant; re-anchor to the same UTC calendar date
+      // expressed in local time, so downstream local getters (toMonthKey) are timezone-safe.
+      var utc = new Date(Math.round((v - 25569) * 86400 * 1000));
+      if (!isNaN(utc)) return new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate());
     }
     if (typeof v === "string") {
-      var d = new Date(v);
+      var trimmed = v.trim();
+      // Bare "YYYY-MM-DD" (no time part) is parsed by the JS Date spec as UTC midnight,
+      // which shifts to the previous local day (and possibly month) west of UTC. Parse
+      // the components directly as a local date instead of going through Date(string).
+      var iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (iso) return new Date(+iso[1], +iso[2] - 1, +iso[3]);
+      var d = new Date(trimmed);
       if (!isNaN(d)) return d;
-      var m = v.match(/^(20\d{2})[-\/](\d{1,2})/);
+      var m = trimmed.match(/^(20\d{2})[-\/](\d{1,2})/);
       if (m) return new Date(+m[1], +m[2] - 1, 1);
     }
     return null;
@@ -563,7 +573,7 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
         var wb;
         if (/\.csv$/i.test(file.name)) {
           var text = new TextDecoder("utf-8").decode(data);
-          wb = XLSX.read(text, { type: "string" });
+          wb = XLSX.read(text, { type: "string", raw: true });
         } else {
           wb = XLSX.read(data, { type: "array", cellDates: true });
         }
@@ -800,6 +810,9 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
   /* ============================== Rendering ============================== */
   function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
 
+  var lastAgg = null;
+  var lastTopN = null;
+
   function buildDashboard() {
     var agg = aggregate(records);
     if (agg.months.length === 0) return;
@@ -807,6 +820,8 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     document.getElementById("dashboardPanel").hidden = false;
     var effectiveN = Math.min(topN, agg.services.length);
     document.getElementById("topNLabel").textContent = effectiveN;
+    lastAgg = agg;
+    lastTopN = effectiveN;
 
     renderKPIs(agg);
     renderTrendChart(agg);
@@ -897,6 +912,84 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     });
   }
 
+  function barValueLabelPlugin(formatter, opts) {
+    opts = opts || {};
+    var fontSize = opts.fontSize || 11;
+    return {
+      id: "barValueLabel",
+      afterDatasetsDraw: function (chart) {
+        var ctx = chart.ctx;
+        var horizontal = chart.options.indexAxis === "y";
+        chart.data.datasets.forEach(function (dataset, di) {
+          var meta = chart.getDatasetMeta(di);
+          if (meta.hidden) return;
+          meta.data.forEach(function (bar, i) {
+            var value = dataset.data[i];
+            if (value == null) return;
+            var label = formatter(value, i, dataset, di);
+            if (!label) return;
+            var pos = bar.tooltipPosition();
+            ctx.save();
+            ctx.fillStyle = cssVar("--text-secondary");
+            ctx.font = "600 " + fontSize + "px system-ui, -apple-system, 'Segoe UI', sans-serif";
+            if (horizontal) {
+              ctx.textAlign = value >= 0 ? "left" : "right";
+              ctx.textBaseline = "middle";
+              ctx.fillText(label, pos.x + (value >= 0 ? 5 : -5), pos.y);
+            } else {
+              ctx.textAlign = "center";
+              ctx.textBaseline = value >= 0 ? "bottom" : "top";
+              ctx.fillText(label, pos.x, pos.y + (value >= 0 ? -4 : 4));
+            }
+            ctx.restore();
+          });
+        });
+      }
+    };
+  }
+
+  function hexLuminance(hex) {
+    var h = String(hex || "").replace("#", "");
+    if (h.length === 3) h = h.split("").map(function (c) { return c + c; }).join("");
+    if (h.length !== 6) return 0.5;
+    var r = parseInt(h.substr(0, 2), 16) / 255;
+    var g = parseInt(h.substr(2, 2), 16) / 255;
+    var b = parseInt(h.substr(4, 2), 16) / 255;
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  function doughnutLabelPlugin(minPct) {
+    minPct = minPct || 4;
+    return {
+      id: "doughnutLabel",
+      afterDatasetsDraw: function (chart) {
+        var ctx = chart.ctx;
+        var meta = chart.getDatasetMeta(0);
+        var dataset = chart.data.datasets[0];
+        var total = dataset.data.reduce(function (s, v) { return s + v; }, 0) || 1;
+        meta.data.forEach(function (arc, i) {
+          var value = dataset.data[i];
+          if (value == null) return;
+          var pct = (value / total) * 100;
+          if (pct < minPct) return;
+          var midAngle = (arc.startAngle + arc.endAngle) / 2;
+          var midRadius = (arc.innerRadius + arc.outerRadius) / 2;
+          var x = arc.x + Math.cos(midAngle) * midRadius;
+          var y = arc.y + Math.sin(midAngle) * midRadius;
+          var bg = Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor[i] : dataset.backgroundColor;
+          var lum = hexLuminance(bg);
+          ctx.save();
+          ctx.fillStyle = lum > 0.6 ? "#0b0b0b" : "#ffffff";
+          ctx.font = "700 12px system-ui, -apple-system, 'Segoe UI', sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(pct.toFixed(1) + "%", x, y);
+          ctx.restore();
+        });
+      }
+    };
+  }
+
   function renderMoMChart(agg) {
     var ctx = document.getElementById("chartMoM").getContext("2d");
     destroyChart("mom");
@@ -913,8 +1006,10 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     charts.mom = new Chart(ctx, {
       type: "bar",
       data: { labels: labels, datasets: [{ label: "MoM % change", data: pct.map(function(v){return v==null?0:Math.round(v*10)/10;}), backgroundColor: colors, borderRadius: 4, maxBarThickness: 46 }] },
+      plugins: [barValueLabelPlugin(function (v) { return fmtPct(v); })],
       options: {
         responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 22, bottom: 18 } },
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: function (c) { return (c.parsed.y >= 0 ? "Increase " : "Decrease ") + fmtPct(c.parsed.y).replace(/[+]/,""); } } }
@@ -941,14 +1036,16 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
         labels: ranked.map(function (r) { return r.service; }),
         datasets: [{ label: "Cost (USD)", data: ranked.map(function (r) { return Math.round(r.cost * 100) / 100; }), backgroundColor: blue, borderRadius: 4 }]
       },
+      plugins: [barValueLabelPlugin(function (v) { return fmtUSDCompact(v).replace(/&\w+;/g, ""); }, { fontSize: 10 })],
       options: {
         indexAxis: "y", responsive: true, maintainAspectRatio: false,
+        layout: { padding: { right: 60 } },
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: function (c) { return "  " + fmtUSD(c.parsed.x); } } }
         },
         scales: {
-          x: { grid: { color: cssVar("--gridline") }, ticks: { color: muted, callback: function (v) { return fmtUSDCompact(v).replace(/&\w+;/g, ""); } } },
+          x: { grid: { color: cssVar("--gridline") }, grace: "15%", ticks: { color: muted, callback: function (v) { return fmtUSDCompact(v).replace(/&\w+;/g, ""); } } },
           y: { grid: { display: false }, ticks: { color: muted, autoSkip: false, font: { size: 10 } } }
         }
       }
@@ -973,6 +1070,7 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     charts.share = new Chart(ctx, {
       type: "doughnut",
       data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderColor: cssVar("--surface-1"), borderWidth: 2 }] },
+      plugins: [doughnutLabelPlugin(4)],
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: {
@@ -998,15 +1096,17 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
         labels: ranked.map(function (r) { return r.service; }),
         datasets: [{ label: "Cost (USD)", data: costs.map(function (c) { return Math.round(c * 100) / 100; }), backgroundColor: colors, borderRadius: 3 }]
       },
+      plugins: [barValueLabelPlugin(function (v) { return fmtUSDCompact(v).replace(/&\w+;/g, ""); }, { fontSize: 9 })],
       options: {
         indexAxis: "y", responsive: true, maintainAspectRatio: false,
+        layout: { padding: { right: 60 } },
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: function (c) { return "  " + fmtUSD(c.parsed.x) + (c.parsed.x >= mean ? "  (above avg)" : "  (below avg)"); } } },
           annotation: undefined
         },
         scales: {
-          x: { grid: { color: cssVar("--gridline") }, ticks: { color: muted, callback: function (v) { return fmtUSDCompact(v).replace(/&\w+;/g, ""); } } },
+          x: { grid: { color: cssVar("--gridline") }, grace: "15%", ticks: { color: muted, callback: function (v) { return fmtUSDCompact(v).replace(/&\w+;/g, ""); } } },
           y: { grid: { display: false }, ticks: { color: muted, autoSkip: false, font: { size: 9 } } }
         }
       }
@@ -1247,6 +1347,145 @@ footer.appfoot { text-align: center; color: var(--text-muted); font-size: 0.76re
     a.click();
   });
   document.getElementById("printBtn").addEventListener("click", function () { window.print(); });
+
+  /* ============================== PPTX export ============================== */
+  function domTableToRows(tableId) {
+    var table = document.getElementById(tableId);
+    if (!table) return [];
+    var rows = [];
+    table.querySelectorAll("thead tr").forEach(function (tr) {
+      rows.push(Array.prototype.map.call(tr.children, function (th) {
+        return { text: th.textContent.trim(), options: { bold: true, color: "FFFFFF", fill: { color: "1F3864" }, fontSize: 9 } };
+      }));
+    });
+    table.querySelectorAll("tbody tr").forEach(function (tr) {
+      rows.push(Array.prototype.map.call(tr.children, function (td) {
+        return { text: td.textContent.trim(), options: { fontSize: 8 } };
+      }));
+    });
+    return rows;
+  }
+
+  function execSectionsData() {
+    var sections = [];
+    document.querySelectorAll("#execBody .exec-section").forEach(function (sec) {
+      var heading = sec.querySelector("h4");
+      var bullets = [];
+      sec.querySelectorAll("p, li").forEach(function (el) {
+        var t = el.textContent.replace(/\s+/g, " ").trim();
+        if (t) bullets.push(t);
+      });
+      sections.push({ heading: heading ? heading.textContent.trim() : "", bullets: bullets });
+    });
+    return sections;
+  }
+
+  function addBulletSlide(pptx, title, sections) {
+    var slide = pptx.addSlide();
+    slide.addText(title, { x: 0.4, y: 0.25, w: 9.2, h: 0.5, fontSize: 20, bold: true, color: "1F3864" });
+    var y = 0.9;
+    sections.forEach(function (sec) {
+      if (y > 6.9) return;
+      slide.addText(sec.heading, { x: 0.4, y: y, w: 9.2, h: 0.3, fontSize: 13, bold: true, color: "2a78d6" });
+      y += 0.35;
+      var bulletText = sec.bullets.map(function (b) { return { text: b, options: { bullet: true, breakLine: true } }; });
+      var estHeight = Math.max(0.3, sec.bullets.length * 0.4);
+      slide.addText(bulletText, { x: 0.5, y: y, w: 9.0, h: estHeight, fontSize: 11, color: "0b0b0b", valign: "top" });
+      y += estHeight + 0.15;
+    });
+  }
+
+  function exportToPptx() {
+    if (!lastAgg) return;
+    var btn = document.getElementById("exportPptxBtn");
+    var originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Generating…";
+
+    setTimeout(function () {
+      try {
+        var pptx = new PptxGenJS();
+        pptx.layout = "LAYOUT_WIDE";
+        pptx.author = "Service Usage Cost Analytics Dashboard";
+        pptx.title = "Service Usage Cost Analytics Dashboard";
+
+        var metaText = document.getElementById("execMeta").textContent.trim();
+
+        // Title slide
+        var title = pptx.addSlide();
+        title.background = { color: "1F3864" };
+        title.addText("Service Usage Cost Analytics Dashboard", { x: 0.6, y: 2.3, w: 9, h: 1, fontSize: 32, bold: true, color: "FFFFFF" });
+        title.addText(metaText, { x: 0.6, y: 3.3, w: 9, h: 0.8, fontSize: 14, color: "D9E2F3" });
+        title.addText("Generated " + new Date().toLocaleString(), { x: 0.6, y: 4.9, w: 9, h: 0.4, fontSize: 11, color: "9FB6E0" });
+
+        // KPI slide
+        var kpiSlide = pptx.addSlide();
+        kpiSlide.addText("Key Performance Indicators", { x: 0.4, y: 0.25, w: 9.2, h: 0.5, fontSize: 20, bold: true, color: "1F3864" });
+        var kpiCards = document.querySelectorAll("#kpiGrid .kpi");
+        var kpiW = 1.84, kpiGap = 0.1, kpiX0 = 0.4;
+        kpiCards.forEach(function (card, i) {
+          var label = card.querySelector(".label").textContent.trim();
+          var value = card.querySelector(".value").textContent.trim();
+          var sub = card.querySelector(".sub").textContent.trim();
+          var x = kpiX0 + i * (kpiW + kpiGap);
+          kpiSlide.addShape("roundRect", { x: x, y: 1.1, w: kpiW, h: 1.5, fill: { color: "F4F6FB" }, line: { color: "D9E2F3" }, rectRadius: 0.06 });
+          kpiSlide.addText(label.toUpperCase(), { x: x + 0.08, y: 1.2, w: kpiW - 0.16, h: 0.4, fontSize: 8, bold: true, color: "6B7280" });
+          kpiSlide.addText(value, { x: x + 0.08, y: 1.55, w: kpiW - 0.16, h: 0.5, fontSize: 16, bold: true, color: "1F3864" });
+          kpiSlide.addText(sub, { x: x + 0.08, y: 2.1, w: kpiW - 0.16, h: 0.45, fontSize: 8, color: "52514E" });
+        });
+
+        // Chart image slides
+        [
+          { chart: "trend", title: "Monthly Total Cost Trend" },
+          { chart: "mom", title: "Month-on-Month % Change" },
+          { chart: "topsvc", title: document.getElementById("topSvcTitle").textContent },
+          { chart: "share", title: "Cost Share by Service" },
+          { chart: "dist", title: "Service Cost Distribution" }
+        ].forEach(function (c) {
+          if (!charts[c.chart]) return;
+          var slide = pptx.addSlide();
+          slide.addText(c.title, { x: 0.4, y: 0.25, w: 9.2, h: 0.5, fontSize: 20, bold: true, color: "1F3864" });
+          var img = charts[c.chart].toBase64Image();
+          var canvas = charts[c.chart].canvas;
+          var ratio = canvas.height / canvas.width;
+          var w = 9.0, h = Math.min(6.2, w * ratio);
+          slide.addImage({ data: img, x: (10 - w) / 2, y: 1.0, w: w, h: h });
+        });
+
+        // Month-on-month comparison table
+        var momRows = domTableToRows("momTable");
+        if (momRows.length) {
+          var momSlide = pptx.addSlide();
+          momSlide.addText("Month-on-Month Comparison", { x: 0.4, y: 0.25, w: 9.2, h: 0.5, fontSize: 20, bold: true, color: "1F3864" });
+          momSlide.addTable(momRows, { x: 0.4, y: 1.0, w: 9.2, autoPage: false, border: { type: "solid", color: "E1E0D9", pt: 0.5 } });
+        }
+
+        // Monthly increase (Top N services) table
+        var increaseRows = domTableToRows("increaseTable");
+        if (increaseRows.length) {
+          var incSlide = pptx.addSlide();
+          incSlide.addText(document.getElementById("increaseTitle").textContent, { x: 0.4, y: 0.25, w: 9.2, h: 0.5, fontSize: 20, bold: true, color: "1F3864" });
+          incSlide.addTable(increaseRows, { x: 0.4, y: 0.9, w: 9.2, autoPage: true, fontSize: 8, border: { type: "solid", color: "E1E0D9", pt: 0.5 } });
+        }
+
+        // Executive summary slides (split into two for readability)
+        var sections = execSectionsData();
+        var mid = Math.ceil(sections.length / 2);
+        addBulletSlide(pptx, "Executive Summary (1/2)", sections.slice(0, mid));
+        addBulletSlide(pptx, "Executive Summary (2/2)", sections.slice(mid));
+
+        pptx.writeFile({ fileName: "service-usage-dashboard.pptx" });
+      } catch (err) {
+        console.error(err);
+        alert("PPTX export failed: " + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }, 30);
+  }
+
+  document.getElementById("exportPptxBtn").addEventListener("click", exportToPptx);
 
   /* ============================== Detail table ============================== */
   function renderDetailTable() {
